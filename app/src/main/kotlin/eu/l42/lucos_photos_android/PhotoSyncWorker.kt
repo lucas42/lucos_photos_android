@@ -41,7 +41,7 @@ class PhotoSyncWorker(
 
         var anyRetryableFailure = false
 
-        for (photo in photos) {
+        for ((index, photo) in photos.withIndex()) {
             Log.d(TAG, "Uploading photo: ${photo.displayName} (id=${photo.id})")
 
             val result = try {
@@ -62,9 +62,17 @@ class PhotoSyncWorker(
             when (result) {
                 is PhotoUploader.UploadResult.Success -> {
                     Log.i(TAG, "Successfully uploaded photo ${photo.id} (${photo.displayName})")
-                    // Update the sync timestamp to this photo's add time so we don't re-upload it
-                    // Convert back to milliseconds for storage
-                    syncPrefs.lastSyncTimestampMs = photo.dateAddedSeconds * 1000L
+                    // Only advance the sync timestamp once all photos at this DATE_ADDED second
+                    // have been processed. DATE_ADDED has one-second granularity, so advancing to
+                    // photo.dateAddedSeconds after the first photo of a batch-at-the-same-second
+                    // would cause the query (DATE_ADDED > lastSyncSeconds) to skip remaining photos
+                    // in that same second. We advance only when the next photo is in a later second
+                    // (or there are no more photos).
+                    val nextPhotoInDifferentSecond = index + 1 >= photos.size ||
+                            photos[index + 1].dateAddedSeconds > photo.dateAddedSeconds
+                    if (nextPhotoInDifferentSecond) {
+                        syncPrefs.lastSyncTimestampMs = photo.dateAddedSeconds * 1000L
+                    }
                 }
                 is PhotoUploader.UploadResult.Failure -> {
                     Log.w(TAG, "Failed to upload photo ${photo.id}: ${result.message} (retryable=${result.retryable})")
@@ -73,9 +81,13 @@ class PhotoSyncWorker(
                         // Stop processing further photos — retry later with the same timestamp
                         break
                     }
-                    // Non-retryable (e.g. auth error): log and skip this photo, advance timestamp
-                    // to avoid blocking on it forever. The photo will be skipped permanently.
-                    syncPrefs.lastSyncTimestampMs = photo.dateAddedSeconds * 1000L
+                    // Non-retryable (e.g. auth error): log and skip this photo. Only advance the
+                    // timestamp when all photos at this second are done (same logic as success).
+                    val nextPhotoInDifferentSecond = index + 1 >= photos.size ||
+                            photos[index + 1].dateAddedSeconds > photo.dateAddedSeconds
+                    if (nextPhotoInDifferentSecond) {
+                        syncPrefs.lastSyncTimestampMs = photo.dateAddedSeconds * 1000L
+                    }
                 }
             }
         }

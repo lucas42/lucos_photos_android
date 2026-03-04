@@ -4,7 +4,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.RequestBody
+import okio.BufferedSink
+import okio.source
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
@@ -45,10 +47,18 @@ class PhotoUploader(
      * @param mimeType     MIME type of the photo (e.g. "image/jpeg").
      */
     fun upload(inputStream: InputStream, filename: String, mimeType: String): UploadResult {
-        val bytes = try {
-            inputStream.readBytes()
-        } catch (e: IOException) {
-            return UploadResult.Failure("Failed to read photo: ${e.message}", retryable = true)
+        // Stream directly from the InputStream rather than buffering the whole photo in memory.
+        // Large photos (e.g. RAW files, 30–50 MB) could otherwise cause OutOfMemoryError.
+        val mediaType = mimeType.toMediaType()
+        val streamingBody = object : RequestBody() {
+            override fun contentType() = mediaType
+            override fun writeTo(sink: BufferedSink) {
+                try {
+                    sink.writeAll(inputStream.source())
+                } catch (e: IOException) {
+                    throw e // Let OkHttp surface this as a network/IO failure
+                }
+            }
         }
 
         val requestBody = MultipartBody.Builder()
@@ -56,7 +66,7 @@ class PhotoUploader(
             .addFormDataPart(
                 name = "file",
                 filename = filename,
-                body = bytes.toRequestBody(mimeType.toMediaType()),
+                body = streamingBody,
             )
             .build()
 
