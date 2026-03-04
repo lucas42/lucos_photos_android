@@ -1,7 +1,9 @@
 package eu.l42.lucos_photos_android
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
@@ -15,7 +17,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.ByteArrayInputStream
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -26,6 +30,42 @@ class PhotoSyncWorkerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+    }
+
+    /**
+     * Seeds the Robolectric MediaStore with a fake photo and registers a fake InputStream
+     * via ShadowContentResolver so that PhotoSyncWorker's openInputStream() call returns
+     * real (fake) bytes rather than null.
+     *
+     * Without the ShadowContentResolver registration, openInputStream() returns null for
+     * MediaStore URIs that don't point to real files, and the worker exits via the
+     * "Could not open input stream" path without ever calling uploader.upload(). This means
+     * mock expectations on the uploader would never be triggered.
+     *
+     * @return the URI of the inserted MediaStore entry.
+     */
+    private fun seedMediaStoreWithPhoto(
+        displayName: String,
+        dateAddedSeconds: Long,
+    ): Uri {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_ADDED, dateAddedSeconds)
+            put(MediaStore.Images.Media.DATA, "/sdcard/$displayName")
+        }
+        val insertedUri = context.contentResolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            values,
+        ) ?: error("Failed to insert test photo into MediaStore")
+
+        // Register a fake input stream so openInputStream() returns non-null bytes.
+        // PhotoSyncWorker opens the stream via ContentUris.withAppendedId, which produces
+        // the same URI that the insert returned — so we register on that URI.
+        val fakeStream = ByteArrayInputStream("fake-jpeg-bytes".toByteArray())
+        Shadows.shadowOf(context.contentResolver).registerInputStream(insertedUri, fakeStream)
+
+        return insertedUri
     }
 
     @Test
@@ -51,20 +91,14 @@ class PhotoSyncWorkerTest {
 
     @Test
     fun `worker retries on auth failure without advancing sync timestamp`() = runBlocking {
-        // Seed the Robolectric MediaStore with one photo
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "auth_test_photo.jpg")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.DATE_ADDED, 2000L) // seconds since epoch
-            put(MediaStore.Images.Media.DATA, "/sdcard/auth_test_photo.jpg")
-        }
-        context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        // Seed the MediaStore and register a real (fake) stream so the uploader is actually invoked
+        seedMediaStoreWithPhoto("auth_test_photo.jpg", dateAddedSeconds = 2000L)
 
         val mockUploader = mockk<PhotoUploader>()
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
-        // Auth failure — API key is wrong
+        // Auth failure — API key is wrong; the mock uploader will be called and return AuthFailure
         every { mockUploader.upload(any(), any(), any()) } returns
             PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key")
 
@@ -75,26 +109,22 @@ class PhotoSyncWorkerTest {
         val result = worker.doWork()
         // Worker should stop the batch and schedule a retry
         assertEquals(ListenableWorker.Result.retry(), result)
+        // The uploader must have been called (verifying we went through the upload path, not null-stream)
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
         // The sync timestamp must NOT have been advanced — photos must still be in window
         verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
     }
 
     @Test
     fun `worker retries on retryable upload failure`() = runBlocking {
-        // Seed the Robolectric MediaStore with one photo so the worker has something to upload
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "test_photo.jpg")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.DATE_ADDED, 1000L) // seconds since epoch
-            put(MediaStore.Images.Media.DATA, "/sdcard/test_photo.jpg")
-        }
-        context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        // Seed the MediaStore and register a real (fake) stream so the uploader is actually invoked
+        seedMediaStoreWithPhoto("test_photo.jpg", dateAddedSeconds = 1000L)
 
         val mockUploader = mockk<PhotoUploader>()
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
-        // Make the uploader return a retryable failure for any upload attempt
+        // Retryable failure — e.g. network error; the mock uploader will be called
         every { mockUploader.upload(any(), any(), any()) } returns
             PhotoUploader.UploadResult.Failure("Network error", retryable = true)
 
@@ -105,5 +135,7 @@ class PhotoSyncWorkerTest {
         val result = worker.doWork()
         // With a retryable failure, the worker should return retry() not success()
         assertEquals(ListenableWorker.Result.retry(), result)
+        // The uploader must have been called (verifying we went through the upload path, not null-stream)
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
     }
 }

@@ -1,6 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+}
+
+// Read secrets from local.properties (gitignored). This file should contain:
+//   photos_api_key=YOUR_ACTUAL_KEY_HERE
+// If the file doesn't exist (e.g. in CI), the placeholder value is used and must be
+// replaced before the APK is sideloaded.
+val localProperties = Properties().also { props ->
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        props.load(localPropertiesFile.inputStream())
+    }
 }
 
 android {
@@ -15,6 +28,18 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Inject the API key at build time from local.properties.
+        // To set the real key: add `photos_api_key=YOUR_KEY` to local.properties (never commit this file).
+        buildConfigField(
+            "String",
+            "PHOTOS_API_KEY",
+            "\"${localProperties.getProperty("photos_api_key", "REPLACE_WITH_YOUR_API_KEY")}\"",
+        )
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

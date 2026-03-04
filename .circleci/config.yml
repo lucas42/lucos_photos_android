@@ -1,3 +1,6 @@
+# Note: this project does not use the standard lucos/deploy orb because the output is a
+# sideloaded Android APK rather than a Docker image pushed to a registry. There is no
+# deploy step — the APK is stored as a CI artifact and signed + installed manually.
 version: 2.1
 jobs:
   test:
