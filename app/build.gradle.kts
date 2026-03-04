@@ -18,12 +18,12 @@ val localProperties = Properties().also { props ->
 
 android {
     namespace = "eu.l42.lucos_photos_android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "eu.l42.lucos_photos_android"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
