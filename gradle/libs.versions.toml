@@ -2,7 +2,7 @@
 agp = "8.7.3"
 kotlin = "2.1.0"
 coreKtx = "1.17.0"
-appcompat = "1.7.0"
+appcompat = "1.7.1"
 workManager = "2.10.0"
 okhttp = "5.3.2"
 junit = "4.13.2"
