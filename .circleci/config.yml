@@ -26,6 +26,4 @@ workflows:
   build-deploy:
     jobs:
       - test
-      - build-apk:
-          requires:
-            - test
+      - build-apk

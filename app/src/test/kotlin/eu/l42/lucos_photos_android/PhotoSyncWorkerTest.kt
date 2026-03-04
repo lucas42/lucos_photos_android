@@ -1,6 +1,8 @@
 package eu.l42.lucos_photos_android
 
+import android.content.ContentValues
 import android.content.Context
+import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
@@ -50,25 +52,30 @@ class PhotoSyncWorkerTest {
 
     @Test
     fun `worker retries on retryable upload failure`() = runBlocking {
-        // This test verifies the retry logic path by mocking an uploader that always fails
-        // with a retryable error. Since Robolectric MediaStore is empty, we test the logic
-        // path via the worker returning success (no photos to upload) — the retry logic
-        // is exercised directly in PhotoUploaderTest.
-        //
-        // A full integration test of the retry path would require seeding MediaStore with
-        // photos, which requires additional Robolectric setup beyond the scope of unit tests.
+        // Seed the Robolectric MediaStore with one photo so the worker has something to upload
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "test_photo.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_ADDED, 1000L) // seconds since epoch
+            put(MediaStore.Images.Media.DATA, "/sdcard/test_photo.jpg")
+        }
+        context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+
         val mockUploader = mockk<PhotoUploader>()
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        // Make the uploader return a retryable failure for any upload attempt
+        every { mockUploader.upload(any(), any(), any()) } returns
+            PhotoUploader.UploadResult.Failure("Network error", retryable = true)
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
             .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
             .build()
 
         val result = worker.doWork()
-        // With empty MediaStore, result should be success (nothing to upload)
-        assertEquals(ListenableWorker.Result.success(), result)
+        // With a retryable failure, the worker should return retry() not success()
+        assertEquals(ListenableWorker.Result.retry(), result)
     }
 }
 
