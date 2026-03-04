@@ -138,4 +138,31 @@ class PhotoSyncWorkerTest {
         // The uploader must have been called (verifying we went through the upload path, not null-stream)
         verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
     }
+
+    @Test
+    fun `worker advances sync timestamp after successful upload`() = runBlocking {
+        // Seed the MediaStore and register a real (fake) stream so the uploader is actually invoked.
+        // dateAddedSeconds = 5000 means the worker should advance lastSyncTimestampMs to 5_000_000.
+        seedMediaStoreWithPhoto("success_photo.jpg", dateAddedSeconds = 5000L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        val result = worker.doWork()
+        // Successful upload should complete the sync
+        assertEquals(ListenableWorker.Result.success(), result)
+        // The uploader must have been called with the seeded photo
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
+        // The sync timestamp must have been advanced to the photo's DATE_ADDED second (in ms).
+        // This verifies the core invariant: after a successful upload, photos before this timestamp
+        // will not be re-queried on the next sync run.
+        verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 5000L * 1000L }
+    }
 }
