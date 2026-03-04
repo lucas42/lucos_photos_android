@@ -6,7 +6,7 @@ appcompat = "1.7.0"
 workManager = "2.10.0"
 okhttp = "4.12.0"
 junit = "4.13.2"
-mockk = "1.13.16"
+mockk = "1.14.9"
 robolectric = "4.14.1"
 
 [libraries]
