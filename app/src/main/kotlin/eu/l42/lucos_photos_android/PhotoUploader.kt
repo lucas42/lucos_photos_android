@@ -32,9 +32,22 @@ class PhotoUploader(
         data object Success : UploadResult()
 
         /**
+         * Upload failed due to a configuration problem (HTTP 401 or 403).
+         *
+         * This is distinguished from [Failure] because an auth error almost certainly
+         * affects every photo (not just this one), so the worker should stop the entire
+         * batch and schedule a retry rather than skipping the photo and advancing the
+         * sync timestamp past it. If we advanced the timestamp on a 401, every photo in
+         * the current window would be permanently lost from the sync backlog even after
+         * the API key is corrected.
+         */
+        data class AuthFailure(val message: String) : UploadResult()
+
+        /**
          * Upload failed. If [retryable] is true, WorkManager's retry mechanism should
-         * be relied upon to retry later. Non-retryable failures (e.g. auth errors) are
-         * logged but not retried.
+         * be relied upon to retry later. Non-retryable failures (e.g. storage full) are
+         * logged but skipped — the photo is not retried and the sync timestamp advances
+         * past it.
          */
         data class Failure(val message: String, val retryable: Boolean) : UploadResult()
     }
@@ -81,9 +94,8 @@ class PhotoUploader(
                 when {
                     response.code == 200 || response.code == 201 -> UploadResult.Success
                     response.code == 401 || response.code == 403 -> {
-                        UploadResult.Failure(
+                        UploadResult.AuthFailure(
                             "Authentication failed (HTTP ${response.code}) — check API key",
-                            retryable = false,
                         )
                     }
                     response.code == 507 -> {

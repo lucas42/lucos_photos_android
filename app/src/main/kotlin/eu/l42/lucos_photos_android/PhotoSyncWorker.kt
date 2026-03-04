@@ -74,6 +74,15 @@ class PhotoSyncWorker(
                         syncPrefs.lastSyncTimestampMs = photo.dateAddedSeconds * 1000L
                     }
                 }
+                is PhotoUploader.UploadResult.AuthFailure -> {
+                    // An auth error (401/403) almost certainly means our API key is wrong, which
+                    // will affect every photo — not just this one. Do NOT advance the sync
+                    // timestamp. Instead, stop the batch and schedule a retry so that once the
+                    // key is corrected, all photos in the current window are still uploaded.
+                    Log.e(TAG, "Auth failure uploading photo ${photo.id}: ${result.message} — stopping batch, will retry")
+                    anyRetryableFailure = true
+                    break
+                }
                 is PhotoUploader.UploadResult.Failure -> {
                     Log.w(TAG, "Failed to upload photo ${photo.id}: ${result.message} (retryable=${result.retryable})")
                     if (result.retryable) {
@@ -81,8 +90,9 @@ class PhotoSyncWorker(
                         // Stop processing further photos — retry later with the same timestamp
                         break
                     }
-                    // Non-retryable (e.g. auth error): log and skip this photo. Only advance the
-                    // timestamp when all photos at this second are done (same logic as success).
+                    // Non-retryable (e.g. storage full on server): log and skip this photo.
+                    // Only advance the timestamp when all photos at this second are done
+                    // (same logic as success).
                     val nextPhotoInDifferentSecond = index + 1 >= photos.size ||
                             photos[index + 1].dateAddedSeconds > photo.dateAddedSeconds
                     if (nextPhotoInDifferentSecond) {

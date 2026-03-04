@@ -58,19 +58,17 @@ class PhotoUploaderTest {
     }
 
     @Test
-    fun `upload returns non-retryable Failure on HTTP 401`() {
+    fun `upload returns AuthFailure on HTTP 401`() {
         val uploader = makeUploader(401)
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
-        assertTrue(result is PhotoUploader.UploadResult.Failure)
-        assertEquals(false, (result as PhotoUploader.UploadResult.Failure).retryable)
+        assertTrue("Expected AuthFailure but got $result", result is PhotoUploader.UploadResult.AuthFailure)
     }
 
     @Test
-    fun `upload returns non-retryable Failure on HTTP 403`() {
+    fun `upload returns AuthFailure on HTTP 403`() {
         val uploader = makeUploader(403)
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
-        assertTrue(result is PhotoUploader.UploadResult.Failure)
-        assertEquals(false, (result as PhotoUploader.UploadResult.Failure).retryable)
+        assertTrue("Expected AuthFailure but got $result", result is PhotoUploader.UploadResult.AuthFailure)
     }
 
     @Test

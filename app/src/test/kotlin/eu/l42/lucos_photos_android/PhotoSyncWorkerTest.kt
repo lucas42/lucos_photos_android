@@ -50,6 +50,36 @@ class PhotoSyncWorkerTest {
     }
 
     @Test
+    fun `worker retries on auth failure without advancing sync timestamp`() = runBlocking {
+        // Seed the Robolectric MediaStore with one photo
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "auth_test_photo.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_ADDED, 2000L) // seconds since epoch
+            put(MediaStore.Images.Media.DATA, "/sdcard/auth_test_photo.jpg")
+        }
+        context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        // Auth failure — API key is wrong
+        every { mockUploader.upload(any(), any(), any()) } returns
+            PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key")
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        val result = worker.doWork()
+        // Worker should stop the batch and schedule a retry
+        assertEquals(ListenableWorker.Result.retry(), result)
+        // The sync timestamp must NOT have been advanced — photos must still be in window
+        verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
+    }
+
+    @Test
     fun `worker retries on retryable upload failure`() = runBlocking {
         // Seed the Robolectric MediaStore with one photo so the worker has something to upload
         val values = ContentValues().apply {
