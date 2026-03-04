@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">lucOS Photos Backup</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="status_never_synced">Never synced — tap Sync Now to upload all photos</string>
+    <string name="status_last_synced">Last synced: %1$s</string>
+    <string name="status_syncing">Syncing…</string>
+    <string name="status_permission_denied">Permission denied — cannot access photos</string>
+</resources>

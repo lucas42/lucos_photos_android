@@ -1,0 +1,33 @@
+package eu.l42.lucos_photos_android
+
+import android.content.Context
+import androidx.work.ListenableWorker
+import androidx.work.WorkerFactory
+import androidx.work.WorkerParameters
+
+/**
+ * Custom [WorkerFactory] that injects [PhotoUploader] and [SyncPreferences] into
+ * [PhotoSyncWorker] at construction time.
+ *
+ * WorkManager's default reflection-based factory only knows about the standard two-argument
+ * (Context, WorkerParameters) constructor. By registering this factory we can supply the
+ * additional dependencies and keep the worker testable via constructor injection.
+ */
+class PhotoSyncWorkerFactory(
+    private val uploader: PhotoUploader,
+    private val prefs: SyncPreferences,
+) : WorkerFactory() {
+
+    override fun createWorker(
+        appContext: Context,
+        workerClassName: String,
+        workerParameters: WorkerParameters,
+    ): ListenableWorker? {
+        return if (workerClassName == PhotoSyncWorker::class.java.name) {
+            PhotoSyncWorker(appContext, workerParameters, uploader, prefs)
+        } else {
+            // Return null to let the default factory handle unknown worker classes
+            null
+        }
+    }
+}
