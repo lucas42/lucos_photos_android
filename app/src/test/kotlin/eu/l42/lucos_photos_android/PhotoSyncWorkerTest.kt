@@ -16,7 +16,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.ByteArrayInputStream
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -76,22 +75,5 @@ class PhotoSyncWorkerTest {
         val result = worker.doWork()
         // With a retryable failure, the worker should return retry() not success()
         assertEquals(ListenableWorker.Result.retry(), result)
-    }
-}
-
-/** WorkerFactory that injects mock dependencies into PhotoSyncWorker for testing. */
-class PhotoSyncWorkerFactory(
-    private val uploader: PhotoUploader,
-    private val prefs: SyncPreferences,
-) : androidx.work.WorkerFactory() {
-
-    override fun createWorker(
-        appContext: Context,
-        workerClassName: String,
-        workerParameters: androidx.work.WorkerParameters,
-    ): ListenableWorker? {
-        return if (workerClassName == PhotoSyncWorker::class.java.name) {
-            PhotoSyncWorker(appContext, workerParameters, uploader, prefs)
-        } else null
     }
 }
