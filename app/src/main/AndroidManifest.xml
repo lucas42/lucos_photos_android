@@ -7,6 +7,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!--
+        WAKE_LOCK allows WorkManager to keep the device awake while a background sync is running.
+        WorkManager's own AAR includes this in its manifest merge, but declaring it explicitly
+        here is the safe and recommended approach to ensure syncs aren't interrupted mid-way
+        when the screen turns off.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".PhotoBackupApplication"
