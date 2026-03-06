@@ -1,5 +1,6 @@
 package eu.l42.lucos_photos_android
 
+import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -26,7 +27,7 @@ class PhotoUploaderTest {
         .body("{}".toResponseBody("application/json".toMediaType()))
         .build()
 
-    private fun makeUploader(responseCode: Int): PhotoUploader {
+    private fun makeUploaderWithSlot(responseCode: Int): Pair<PhotoUploader, CapturingSlot<Request>> {
         val requestSlot = slot<Request>()
         val mockCall = mockk<Call>()
         val mockClient = mockk<OkHttpClient>()
@@ -36,12 +37,15 @@ class PhotoUploaderTest {
             makeResponse(responseCode, requestSlot.captured)
         }
 
-        return PhotoUploader(
+        val uploader = PhotoUploader(
             serverUrl = "https://photos.example.com",
             apiKey = "test-key",
             httpClient = mockClient,
         )
+        return Pair(uploader, requestSlot)
     }
+
+    private fun makeUploader(responseCode: Int): PhotoUploader = makeUploaderWithSlot(responseCode).first
 
     @Test
     fun `upload returns Success on HTTP 201`() {
@@ -85,6 +89,13 @@ class PhotoUploaderTest {
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
         assertTrue(result is PhotoUploader.UploadResult.Failure)
         assertEquals(false, (result as PhotoUploader.UploadResult.Failure).retryable)
+    }
+
+    @Test
+    fun `upload sends Authorization header using Bearer scheme`() {
+        val (uploader, requestSlot) = makeUploaderWithSlot(201)
+        uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
+        assertEquals("Bearer test-key", requestSlot.captured.header("Authorization"))
     }
 
     @Test

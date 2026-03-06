@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Handles HTTP uploads to the lucos_photos server.
  *
- * Uploads are authenticated using the `Authorization: key <API_KEY>` scheme.
+ * Uploads are authenticated using the `Authorization: Bearer <API_KEY>` scheme.
  * The server performs SHA256 deduplication, so uploading the same photo twice
  * is safe — the second upload returns HTTP 200 instead of 201.
  */
@@ -85,7 +85,7 @@ class PhotoUploader(
 
         val request = Request.Builder()
             .url("$serverUrl/photos")
-            .addHeader("Authorization", "key $apiKey")
+            .addHeader("Authorization", "Bearer $apiKey")
             .post(requestBody)
             .build()
 
