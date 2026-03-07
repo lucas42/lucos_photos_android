@@ -19,10 +19,13 @@ val localProperties = Properties().also { props ->
 // Signing credentials can be supplied via environment variables (used in the production-build-apk
 // CI job). All four must be set for signing to be configured; if any are absent the build
 // produces an unsigned APK (the normal case for the unsigned build-apk job and local dev builds).
-val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
-val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE").takeIf { !it.isNullOrBlank() }
+val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD").takeIf { !it.isNullOrBlank() }
 val keyAlias = "lucos-photos"
-val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+// Fall back to ANDROID_KEYSTORE_PASSWORD if ANDROID_KEY_PASSWORD is absent or blank —
+// it's common Android convention to use the same password for both.
+val keyPassword = System.getenv("ANDROID_KEY_PASSWORD").takeIf { !it.isNullOrBlank() }
+    ?: keystorePassword
 val ciApiKey = System.getenv("KEY_LUCOS_PHOTOS")
 
 android {
