@@ -64,6 +64,10 @@ workflows:
       - build-apk:
           requires:
             - test
+          filters:
+            branches:
+              ignore:
+                - main
       - production-build-apk:
           requires:
             - test
