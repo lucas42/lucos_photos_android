@@ -9,26 +9,20 @@ The app is not published to the Play Store. It is installed by sideloading a sig
 ### What you need before you start
 
 - An Android device running Android 8.0 (Oreo) or later
-- An API key for the lucos_photos server (contact the server owner)
-- A computer with Java and the Android SDK installed (to build and sign the APK)
 
 ### Steps
 
-**1. Get the API key**
+**1. Download the signed APK**
 
-Ask the server owner for an API key. You will use this in the next step.
+A signed APK is built automatically by CircleCI on every merge to `main`. Download the latest one from the [CircleCI artifacts](https://app.circleci.com/pipelines/github/lucas42/lucos_photos_android) for the `production-build-apk` job.
 
-**2. Build and sign the APK**
+The API key for the lucos_photos server is baked in at build time, so no manual key handling is needed.
 
-The app is not available as a ready-to-install download, because the API key is baked in at build time and is unique to each user. You need to build the APK locally with your API key, then sign it.
+**2. Transfer the APK to your phone**
 
-See [docs/signing.md](docs/signing.md) for step-by-step instructions.
+Copy the downloaded APK to your Android device — for example via USB, cloud storage, or email.
 
-**3. Transfer the signed APK to your phone**
-
-Copy the signed APK to your Android device — for example via USB, cloud storage, or email.
-
-**4. Allow installation from unknown sources**
+**3. Allow installation from unknown sources**
 
 Android blocks app installs from outside the Play Store by default. You need to grant permission for whichever app you use to open the APK (e.g. your file manager or browser):
 
@@ -38,11 +32,11 @@ Android blocks app installs from outside the Play Store by default. You need to 
 4. Find the app you will use to open the APK (e.g. Files, Chrome)
 5. Enable **Allow from this source**
 
-**5. Install the APK**
+**4. Install the APK**
 
 Open the APK file on your device and tap **Install** when prompted.
 
-**6. Grant media access**
+**5. Grant media access**
 
 On first launch, the app will ask for permission to access your photos. Tap **Allow** (or **Allow all photos**) so it can find and upload your images.
 

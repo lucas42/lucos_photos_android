@@ -22,6 +22,40 @@ jobs:
       - store_artifacts:
           path: app/build/outputs/apk/release
           destination: apk
+  production-build-apk:
+    docker:
+      - image: cimg/android:2025.01
+    steps:
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+            - "b7:75:7e:64:66:44:40:06:95:b4:ad:cd:07:a7:6f:08"
+      - run:
+          name: Populate known_hosts
+          command: |
+            ssh-keyscan -p 2202 -H creds.l42.eu >> ~/.ssh/known_hosts
+      - run:
+          name: Fetch production envfile
+          command: |
+            scp -s -P 2202 -o BatchMode=yes docker-deploy@creds.l42.eu:$CIRCLE_PROJECT_REPONAME/production/.env .
+      - run:
+          name: Decode keystore
+          command: |
+            set -a && source .env && set +a
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > /tmp/lucos-photos.keystore
+      - run:
+          name: Build and sign release APK
+          command: |
+            set -a && source .env && set +a
+            export ANDROID_KEYSTORE_FILE=/tmp/lucos-photos.keystore
+            ./gradlew assembleRelease
+      - run:
+          name: Remove keystore
+          command: rm -f /tmp/lucos-photos.keystore
+          when: always
+      - store_artifacts:
+          path: app/build/outputs/apk/release
+          destination: apk
 workflows:
   version: 2
   build-deploy:
@@ -30,3 +64,10 @@ workflows:
       - build-apk:
           requires:
             - test
+      - production-build-apk:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - main

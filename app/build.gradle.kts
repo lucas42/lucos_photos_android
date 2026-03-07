@@ -16,6 +16,15 @@ val localProperties = Properties().also { props ->
     }
 }
 
+// Signing credentials can be supplied via environment variables (used in the production-build-apk
+// CI job). All four must be set for signing to be configured; if any are absent the build
+// produces an unsigned APK (the normal case for the unsigned build-apk job and local dev builds).
+val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val keyAlias = "lucos-photos"
+val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val ciApiKey = System.getenv("KEY_LUCOS_PHOTOS")
+
 android {
     namespace = "eu.l42.lucos_photos_android"
     compileSdk = 36
@@ -29,25 +38,37 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Inject the API key at build time from local.properties.
-        // To set the real key: add `photos_api_key=YOUR_KEY` to local.properties (never commit this file).
-        buildConfigField(
-            "String",
-            "PHOTOS_API_KEY",
-            "\"${localProperties.getProperty("photos_api_key", "REPLACE_WITH_YOUR_API_KEY")}\"",
-        )
+        // Inject the API key at build time. In CI the KEY_LUCOS_PHOTOS env var is used;
+        // locally, set photos_api_key in local.properties (never commit that file).
+        val apiKey = ciApiKey
+            ?: localProperties.getProperty("photos_api_key", "REPLACE_WITH_YOUR_API_KEY")
+        buildConfigField("String", "PHOTOS_API_KEY", "\"$apiKey\"")
     }
 
     buildFeatures {
         buildConfig = true
     }
 
+    signingConfigs {
+        if (keystoreFile != null && keystorePassword != null && keyPassword != null) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // No signing config is defined here. The CI build produces an unsigned APK which
-            // must be signed locally before sideloading to the device. This is intentional for
-            // a single-device sideloaded app — the signing key is never committed to the repo.
+            // Use the release signingConfig when all signing env vars are present (CI production
+            // build). Otherwise produce an unsigned APK (unsigned build-apk job, local dev).
+            val releaseSigningConfig = signingConfigs.findByName("release")
+            if (releaseSigningConfig != null) {
+                signingConfig = releaseSigningConfig
+            }
         }
     }
 
