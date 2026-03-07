@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.testing.WorkManagerTestInitHelper
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -30,6 +31,12 @@ class PhotoSyncWorkerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        // The app disables WorkManager's automatic androidx.startup initialisation and calls
+        // WorkManager.initialize() manually in PhotoBackupApplication.onCreate(). Robolectric
+        // uses the base Application class rather than PhotoBackupApplication, so that manual
+        // init never runs. WorkManagerTestInitHelper re-initialises WorkManager in a way that
+        // is safe for unit tests (synchronous executor, no real scheduling).
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
     }
 
     /**
