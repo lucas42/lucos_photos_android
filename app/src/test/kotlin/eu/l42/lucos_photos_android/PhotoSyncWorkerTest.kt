@@ -1,5 +1,6 @@
 package eu.l42.lucos_photos_android
 
+import android.app.Application
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -22,7 +23,7 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = Application::class)
 class PhotoSyncWorkerTest {
 
     private lateinit var context: Context
@@ -30,11 +31,14 @@ class PhotoSyncWorkerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        // TestListenableWorkerBuilder creates workers directly without going through WorkManager,
-        // so no WorkManager initialisation is needed here. The app disables WorkManager's
-        // automatic androidx.startup initialisation (see AndroidManifest.xml), but that only
-        // affects the real app — in unit tests, TestListenableWorkerBuilder bypasses WorkManager
-        // entirely and instantiates the worker via the supplied WorkerFactory.
+        // Use a plain Application (via @Config above) instead of PhotoBackupApplication to
+        // prevent Robolectric from running PhotoBackupApplication.onCreate(), which initialises
+        // WorkManager and schedules periodic sync work. WorkManager's static singleton interacts
+        // badly with Robolectric's per-test lifecycle — causing IllegalStateException in tests
+        // that exercise code paths beyond the empty-MediaStore short-circuit.
+        //
+        // TestListenableWorkerBuilder bypasses WorkManager entirely and instantiates the worker
+        // directly via the supplied WorkerFactory, so WorkManager initialisation is not needed.
     }
 
     /**
