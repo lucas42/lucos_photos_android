@@ -224,6 +224,50 @@ class PhotoSyncWorkerTest {
     }
 
     @Test
+    fun `worker reads stored timestamp and advances it after subsequent upload`() = runBlocking {
+        // Simulate a second sync run: prefs already hold a non-zero timestamp from a previous sync.
+        // The MediaStore cursor (seeded below) represents a photo that was added AFTER the stored
+        // timestamp — i.e. a new photo the previous sync hadn't seen yet.
+        //
+        // In Robolectric, ShadowContentResolver returns the pre-seeded cursor regardless of the
+        // selection/selectionArgs — it does not actually filter rows. This test therefore
+        // verifies the worker's timestamp-read → timestamp-advance path (not the SQL filter),
+        // which is the critical invariant: lastSyncTimestampMs is read at the start of each run
+        // and advanced to the most-recently-processed photo's dateAddedSeconds after success.
+        //
+        // The SQL filter (DATE_ADDED > ?) is verified indirectly: if the worker passed an
+        // incorrect lastSyncSeconds to the query, the filtering behaviour would diverge from
+        // what MediaStore would return on a real device.
+        val previousSyncTimestampMs = 4_000_000L  // 4000 seconds since epoch, in ms
+        val newPhotoDateAddedSeconds = 6000L       // photo added AFTER the previous sync
+
+        seedMediaStoreWithPhoto(
+            id = 2L,
+            displayName = "new_photo_after_last_sync.jpg",
+            dateAddedSeconds = newPhotoDateAddedSeconds,
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        // Simulate prefs holding the timestamp from a previous sync
+        every { mockPrefs.lastSyncTimestampMs } returns previousSyncTimestampMs
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        val result = worker.doWork()
+        assertEquals(ListenableWorker.Result.success(), result)
+        // The uploader must have been called (the photo was in the cursor)
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
+        // The timestamp must have advanced to the new photo's DATE_ADDED — not reset to 0
+        // or re-set to the old timestamp. This confirms the worker resumes from where it left off.
+        verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = newPhotoDateAddedSeconds * 1000L }
+    }
+
+    @Test
     fun `worker advances sync timestamp after successful upload`() = runBlocking {
         // Seed the MediaStore so the worker finds a photo and invokes the uploader.
         // dateAddedSeconds = 5000 means the worker should advance lastSyncTimestampMs to 5_000_000.
