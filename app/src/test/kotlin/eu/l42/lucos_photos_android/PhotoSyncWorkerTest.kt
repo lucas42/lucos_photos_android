@@ -60,14 +60,17 @@ class PhotoSyncWorkerTest {
      * @param id           The _ID to assign to the fake photo row. Must be unique per test.
      * @param displayName  The DISPLAY_NAME for the fake photo.
      * @param dateAddedSeconds  The DATE_ADDED value (epoch seconds) for the fake photo.
+     * @param dateTakenMs  The DATE_TAKEN value (epoch milliseconds) for the fake photo, or 0
+     *                     to simulate a photo with no recorded taken-at time.
      */
     private fun seedMediaStoreWithPhoto(
         id: Long,
         displayName: String,
         dateAddedSeconds: Long,
+        dateTakenMs: Long = 0L,
     ) {
         // Set up a RoboCursor that the worker's query() call will receive.
-        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE].
+        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN].
         val cursor = RoboCursor()
         cursor.setColumnNames(
             listOf(
@@ -75,11 +78,12 @@ class PhotoSyncWorkerTest {
                 MediaStore.Images.Media.DISPLAY_NAME,
                 MediaStore.Images.Media.DATE_ADDED,
                 MediaStore.Images.Media.MIME_TYPE,
+                MediaStore.Images.Media.DATE_TAKEN,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg"),
+                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs),
             )
         )
 
@@ -113,7 +117,7 @@ class PhotoSyncWorkerTest {
         assertEquals(ListenableWorker.Result.success(), result)
 
         // No uploads should have occurred
-        verify(exactly = 0) { mockUploader.upload(any(), any(), any()) }
+        verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
     }
 
     @Test
@@ -126,7 +130,7 @@ class PhotoSyncWorkerTest {
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
         // Auth failure — API key is wrong; the mock uploader will be called and return AuthFailure
-        every { mockUploader.upload(any(), any(), any()) } returns
+        every { mockUploader.upload(any(), any(), any(), any()) } returns
             PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key")
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -137,7 +141,7 @@ class PhotoSyncWorkerTest {
         // Worker should stop the batch and schedule a retry
         assertEquals(ListenableWorker.Result.retry(), result)
         // The uploader must have been called (verifying we went through the upload path, not null-stream)
-        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
         // The sync timestamp must NOT have been advanced — photos must still be in window
         verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
     }
@@ -152,7 +156,7 @@ class PhotoSyncWorkerTest {
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
         // Retryable failure — e.g. network error; the mock uploader will be called
-        every { mockUploader.upload(any(), any(), any()) } returns
+        every { mockUploader.upload(any(), any(), any(), any()) } returns
             PhotoUploader.UploadResult.Failure("Network error", retryable = true)
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -163,7 +167,60 @@ class PhotoSyncWorkerTest {
         // With a retryable failure, the worker should return retry() not success()
         assertEquals(ListenableWorker.Result.retry(), result)
         // The uploader must have been called (verifying we went through the upload path, not null-stream)
-        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `worker passes DATE_TAKEN as dateTakenMs to uploader`() = runBlocking {
+        // Seed with a photo that has a known DATE_TAKEN value (epoch milliseconds).
+        val expectedDateTakenMs = 1_700_000_000_000L
+        seedMediaStoreWithPhoto(
+            id = 1L,
+            displayName = "dated_photo.jpg",
+            dateAddedSeconds = 3000L,
+            dateTakenMs = expectedDateTakenMs,
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        worker.doWork()
+
+        // The uploader must have been called with the correct dateTakenMs extracted from MediaStore
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), expectedDateTakenMs) }
+    }
+
+    @Test
+    fun `worker passes null dateTakenMs when DATE_TAKEN is zero`() = runBlocking {
+        // Seed with a photo that has DATE_TAKEN = 0 (absent / unknown).
+        seedMediaStoreWithPhoto(
+            id = 1L,
+            displayName = "no_date_photo.jpg",
+            dateAddedSeconds = 3000L,
+            dateTakenMs = 0L,
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        worker.doWork()
+
+        // DATE_TAKEN = 0 must be treated as absent — null must be passed to the uploader
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), null) }
     }
 
     @Test
@@ -176,7 +233,7 @@ class PhotoSyncWorkerTest {
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
-        every { mockUploader.upload(any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
             .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
@@ -186,7 +243,7 @@ class PhotoSyncWorkerTest {
         // Successful upload should complete the sync
         assertEquals(ListenableWorker.Result.success(), result)
         // The uploader must have been called with the seeded photo
-        verify(exactly = 1) { mockUploader.upload(any(), any(), any()) }
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
         // The sync timestamp must have been advanced to the photo's DATE_ADDED second (in ms).
         // This verifies the core invariant: after a successful upload, photos before this timestamp
         // will not be re-queried on the next sync run.
