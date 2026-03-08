@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 
@@ -82,7 +83,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun triggerImmediateSync() {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>().build()
-        WorkManager.getInstance(this).enqueue(request)
+        // Use enqueueUniqueWork so that if a sync is already running or pending, subsequent
+        // taps are ignored (KEEP policy). Without this, each tap enqueues a fresh job that
+        // reads the same lastSyncTimestampMs — causing the full library to be re-scanned
+        // if no photos have been uploaded yet, or duplicating upload work mid-batch.
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            IMMEDIATE_SYNC_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
         Log.i(TAG, "Manual sync triggered")
     }
 
@@ -98,5 +107,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_CODE_PERMISSION = 1001
+        private const val IMMEDIATE_SYNC_WORK_NAME = "photo_sync_immediate"
     }
 }
