@@ -99,6 +99,30 @@ class PhotoUploaderTest {
     }
 
     @Test
+    fun `upload sends X-Taken-At header when dateTakenMs is provided`() {
+        val (uploader, requestSlot) = makeUploaderWithSlot(201)
+        uploader.upload(
+            ByteArrayInputStream("fakedata".toByteArray()),
+            "photo.jpg",
+            "image/jpeg",
+            dateTakenMs = 1700000000000L,
+        )
+        assertEquals("1700000000000", requestSlot.captured.header("X-Taken-At"))
+    }
+
+    @Test
+    fun `upload omits X-Taken-At header when dateTakenMs is null`() {
+        val (uploader, requestSlot) = makeUploaderWithSlot(201)
+        uploader.upload(
+            ByteArrayInputStream("fakedata".toByteArray()),
+            "photo.jpg",
+            "image/jpeg",
+            dateTakenMs = null,
+        )
+        assertEquals(null, requestSlot.captured.header("X-Taken-At"))
+    }
+
+    @Test
     fun `upload returns retryable Failure on IOException`() {
         val mockCall = mockk<Call>()
         val mockClient = mockk<OkHttpClient>()

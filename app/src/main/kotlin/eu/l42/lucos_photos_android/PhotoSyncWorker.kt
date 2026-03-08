@@ -52,6 +52,7 @@ class PhotoSyncWorker(
                         inputStream = stream,
                         filename = photo.displayName,
                         mimeType = photo.mimeType,
+                        dateTakenMs = photo.dateTakenMs,
                     )
                 } ?: PhotoUploader.UploadResult.Failure("Could not open input stream", retryable = true)
             } catch (e: Exception) {
@@ -124,6 +125,7 @@ class PhotoSyncWorker(
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.DATE_ADDED,
             MediaStore.Images.Media.MIME_TYPE,
+            MediaStore.Images.Media.DATE_TAKEN,
         )
         val selection = "${MediaStore.Images.Media.DATE_ADDED} > ?"
         val selectionArgs = arrayOf(afterSeconds.toString())
@@ -140,14 +142,19 @@ class PhotoSyncWorker(
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
             val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.MIME_TYPE)
+            val dateTakenCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
 
             while (cursor.moveToNext()) {
+                // DATE_TAKEN is in milliseconds; it may be 0 for items with no recorded time.
+                // Treat 0 as absent (null) so we don't send a misleading epoch timestamp to the server.
+                val rawDateTaken = cursor.getLong(dateTakenCol)
                 photos.add(
                     PhotoEntry(
                         id = cursor.getLong(idCol),
                         displayName = cursor.getString(nameCol) ?: "photo.jpg",
                         dateAddedSeconds = cursor.getLong(dateCol),
                         mimeType = cursor.getString(mimeCol) ?: "image/jpeg",
+                        dateTakenMs = if (rawDateTaken > 0L) rawDateTaken else null,
                     )
                 )
             }
@@ -162,6 +169,9 @@ class PhotoSyncWorker(
         val displayName: String,
         val dateAddedSeconds: Long,
         val mimeType: String,
+        /** The time the photo was taken, in milliseconds since Unix epoch ([MediaStore.Images.Media.DATE_TAKEN]).
+         *  Null if MediaStore does not have this information (value was 0 or missing). */
+        val dateTakenMs: Long?,
     )
 
     companion object {

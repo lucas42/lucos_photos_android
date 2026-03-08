@@ -58,8 +58,13 @@ class PhotoUploader(
      * @param inputStream  Raw bytes of the photo file. The caller is responsible for closing it.
      * @param filename     Filename to send with the upload (used by the server to infer file extension).
      * @param mimeType     MIME type of the photo (e.g. "image/jpeg").
+     * @param dateTakenMs  The time the photo was taken, in milliseconds since Unix epoch, as reported
+     *                     by [android.provider.MediaStore.Images.Media.DATE_TAKEN]. Sent as the
+     *                     `X-Taken-At` header so the server can populate `taken_at` for photos
+     *                     that lack an EXIF DateTimeOriginal tag (screenshots, downloaded images, etc.).
+     *                     Pass `null` if the value is unknown or unavailable.
      */
-    fun upload(inputStream: InputStream, filename: String, mimeType: String): UploadResult {
+    fun upload(inputStream: InputStream, filename: String, mimeType: String, dateTakenMs: Long? = null): UploadResult {
         // Stream directly from the InputStream rather than buffering the whole photo in memory.
         // Large photos (e.g. RAW files, 30–50 MB) could otherwise cause OutOfMemoryError.
         val mediaType = mimeType.toMediaType()
@@ -83,9 +88,13 @@ class PhotoUploader(
             )
             .build()
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url("$serverUrl/photos")
             .addHeader("Authorization", "Bearer $apiKey")
+        if (dateTakenMs != null) {
+            requestBuilder.addHeader("X-Taken-At", dateTakenMs.toString())
+        }
+        val request = requestBuilder
             .post(requestBody)
             .build()
 
