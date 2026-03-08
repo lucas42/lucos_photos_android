@@ -57,6 +57,12 @@ class PhotoSyncWorkerTest {
      *    the content URI that openInputStream() will be called with. This makes the worker's
      *    stream-reading code succeed rather than falling through to the null-stream path.
      *
+     * Note: ShadowContentResolver ignores the selection/selectionArgs passed to query() and
+     * always returns the pre-seeded cursor. This means the SQL filter
+     * (RELATIVE_PATH = 'DCIM/Camera/' AND DATE_ADDED > ?) is NOT exercised by these tests —
+     * it is enforced by MediaStore on a real device. These tests cover the worker's behaviour
+     * once photos are returned from the query (upload, retry, timestamp advancement, etc.).
+     *
      * @param id           The _ID to assign to the fake photo row. Must be unique per test.
      * @param displayName  The DISPLAY_NAME for the fake photo.
      * @param dateAddedSeconds  The DATE_ADDED value (epoch seconds) for the fake photo.

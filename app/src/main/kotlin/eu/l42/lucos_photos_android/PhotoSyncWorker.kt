@@ -113,8 +113,14 @@ class PhotoSyncWorker(
     }
 
     /**
-     * Queries MediaStore for photos with DATE_ADDED > [afterSeconds].
-     * Returns them ordered by DATE_ADDED ascending so we process oldest-first and can
+     * Queries MediaStore for photos with DATE_ADDED > [afterSeconds] that were taken by the
+     * device's camera (i.e. stored under DCIM/Camera/).
+     *
+     * We filter by RELATIVE_PATH (available since API 29 / Android 10) to exclude WhatsApp
+     * downloads, screenshots, social media cache, and any other images that happen to be on
+     * the device but were not captured by the camera app.
+     *
+     * Returns results ordered by DATE_ADDED ascending so we process oldest-first and can
      * advance the sync timestamp incrementally even if a batch is interrupted.
      */
     private fun queryNewPhotos(afterSeconds: Long): List<PhotoEntry> {
@@ -127,8 +133,14 @@ class PhotoSyncWorker(
             MediaStore.Images.Media.MIME_TYPE,
             MediaStore.Images.Media.DATE_TAKEN,
         )
-        val selection = "${MediaStore.Images.Media.DATE_ADDED} > ?"
-        val selectionArgs = arrayOf(afterSeconds.toString())
+        // Restrict to photos added after the last sync AND stored in the camera roll.
+        // RELATIVE_PATH (available since API 29 / Android 10) is the directory path relative
+        // to the storage volume root; it always ends with '/'.  Camera photos are stored in
+        // "DCIM/Camera/" by the standard Android camera app.  Using an exact match avoids
+        // accidentally picking up paths like "DCIM/Camera_uploads/" (WhatsApp, etc.).
+        val selection = "${MediaStore.Images.Media.DATE_ADDED} > ? AND " +
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+        val selectionArgs = arrayOf(afterSeconds.toString(), "DCIM/Camera/")
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} ASC"
 
         context.contentResolver.query(
