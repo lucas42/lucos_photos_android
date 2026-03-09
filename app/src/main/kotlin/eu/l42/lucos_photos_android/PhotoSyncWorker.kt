@@ -108,6 +108,7 @@ class PhotoSyncWorker(
             Result.retry()
         } else {
             Log.i(TAG, "Sync complete")
+            syncPrefs.lastSyncCompletedAtMs = System.currentTimeMillis()
             Result.success()
         }
     }
