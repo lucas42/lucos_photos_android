@@ -111,6 +111,7 @@ class PhotoSyncWorkerTest {
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
 
         // Build a worker that uses our mocks but will query the (empty) Robolectric MediaStore
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -124,6 +125,8 @@ class PhotoSyncWorkerTest {
 
         // No uploads should have occurred
         verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
+        // Sync completion timestamp must be written even when there are no new photos
+        verify(exactly = 1) { mockPrefs.lastSyncCompletedAtMs = any() }
     }
 
     @Test
@@ -150,6 +153,8 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
         // The sync timestamp must NOT have been advanced — photos must still be in window
         verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
+        // The sync completion timestamp must NOT be written on failure
+        verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
     }
 
     @Test
@@ -174,6 +179,8 @@ class PhotoSyncWorkerTest {
         assertEquals(ListenableWorker.Result.retry(), result)
         // The uploader must have been called (verifying we went through the upload path, not null-stream)
         verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
+        // The sync completion timestamp must NOT be written on failure
+        verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
     }
 
     @Test
@@ -191,6 +198,7 @@ class PhotoSyncWorkerTest {
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -217,6 +225,7 @@ class PhotoSyncWorkerTest {
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -258,6 +267,7 @@ class PhotoSyncWorkerTest {
         // Simulate prefs holding the timestamp from a previous sync
         every { mockPrefs.lastSyncTimestampMs } returns previousSyncTimestampMs
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -283,6 +293,7 @@ class PhotoSyncWorkerTest {
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
@@ -298,5 +309,38 @@ class PhotoSyncWorkerTest {
         // This verifies the core invariant: after a successful upload, photos before this timestamp
         // will not be re-queried on the next sync run.
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 5000L * 1000L }
+    }
+
+    @Test
+    fun `worker writes lastSyncCompletedAtMs after successful sync`() = runBlocking {
+        // Seed a photo so the success path (upload + timestamp advance) is exercised
+        seedMediaStoreWithPhoto(id = 1L, displayName = "completed_photo.jpg", dateAddedSeconds = 7000L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .build()
+
+        val timeBefore = System.currentTimeMillis()
+        val result = worker.doWork()
+        val timeAfter = System.currentTimeMillis()
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        // lastSyncCompletedAtMs must be set to a wall-clock timestamp captured during the sync run.
+        // We can't assert the exact value without mocking System.currentTimeMillis(), but we can
+        // verify it was called exactly once with a value in the expected range.
+        verify(exactly = 1) {
+            mockPrefs.lastSyncCompletedAtMs = withArg { ts ->
+                assert(ts >= timeBefore && ts <= timeAfter) {
+                    "Expected lastSyncCompletedAtMs ($ts) to be between $timeBefore and $timeAfter"
+                }
+            }
+        }
     }
 }

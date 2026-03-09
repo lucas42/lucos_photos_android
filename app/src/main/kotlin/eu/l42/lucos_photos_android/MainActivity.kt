@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 
@@ -45,8 +46,16 @@ class MainActivity : AppCompatActivity() {
 
         syncButton.setOnClickListener {
             if (hasPermission()) {
-                triggerImmediateSync()
+                val request = triggerImmediateSync()
                 statusText.text = getString(R.string.status_syncing)
+                // Observe the work so the UI updates once the sync finishes (or fails).
+                WorkManager.getInstance(this)
+                    .getWorkInfoByIdLiveData(request.id)
+                    .observe(this) { workInfo ->
+                        if (workInfo != null && workInfo.state.isFinished) {
+                            updateStatusText(statusText, SyncPreferences(this))
+                        }
+                    }
             } else {
                 requestPermission()
             }
@@ -81,7 +90,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun triggerImmediateSync() {
+    private fun triggerImmediateSync(): OneTimeWorkRequest {
         val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>().build()
         // Use enqueueUniqueWork so that if a sync is already running or pending, subsequent
         // taps are ignored (KEEP policy). Without this, each tap enqueues a fresh job that
@@ -93,14 +102,15 @@ class MainActivity : AppCompatActivity() {
             request,
         )
         Log.i(TAG, "Manual sync triggered")
+        return request
     }
 
     private fun updateStatusText(textView: TextView, prefs: SyncPreferences) {
-        val lastSync = prefs.lastSyncTimestampMs
-        textView.text = if (lastSync == 0L) {
+        val lastSyncCompletedAt = prefs.lastSyncCompletedAtMs
+        textView.text = if (lastSyncCompletedAt == 0L) {
             getString(R.string.status_never_synced)
         } else {
-            getString(R.string.status_last_synced, java.util.Date(lastSync).toString())
+            getString(R.string.status_last_synced, java.util.Date(lastSyncCompletedAt).toString())
         }
     }
 
