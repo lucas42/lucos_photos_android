@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -22,6 +23,7 @@ import androidx.work.WorkManager
  * - Request the READ_MEDIA_IMAGES (API 33+) or READ_EXTERNAL_STORAGE (API <33) permission
  * - Show the current sync status
  * - Provide a "Sync now" button for manual triggering
+ * - Show an update banner if a newer version is available (detected by the background sync)
  *
  * The app is designed to run headlessly in the background — this UI is just for
  * setup and debugging purposes.
@@ -41,11 +43,13 @@ class MainActivity : AppCompatActivity() {
         val statusText = findViewById<TextView>(R.id.status_text)
         val syncButton = findViewById<Button>(R.id.sync_now_button)
         val versionText = findViewById<TextView>(R.id.version_text)
+        val updateBanner = findViewById<TextView>(R.id.update_banner)
         val prefs = SyncPreferences(this)
 
         versionText.text = getString(R.string.version_label, BuildConfig.VERSION_NAME)
 
         updateStatusText(statusText, prefs)
+        updateBanner(updateBanner, prefs)
 
         syncButton.setOnClickListener {
             if (hasPermission()) {
@@ -57,6 +61,7 @@ class MainActivity : AppCompatActivity() {
                     .observe(this) { workInfo ->
                         if (workInfo != null && workInfo.state.isFinished) {
                             updateStatusText(statusText, SyncPreferences(this))
+                            updateBanner(updateBanner, SyncPreferences(this))
                         }
                     }
             } else {
@@ -66,6 +71,21 @@ class MainActivity : AppCompatActivity() {
 
         if (!hasPermission()) {
             requestPermission()
+        }
+
+        // Request POST_NOTIFICATIONS permission on Android 13+ so the background sync
+        // can post update notifications. This is a best-effort request — if denied, the
+        // sync continues normally without notifications.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_CODE_NOTIFICATION_PERMISSION,
+                )
+            }
         }
     }
 
@@ -82,13 +102,22 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CODE_PERMISSION) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                Log.i(TAG, "Photo permission granted")
-                updateStatusText(findViewById(R.id.status_text), SyncPreferences(this))
-            } else {
-                Log.w(TAG, "Photo permission denied")
-                findViewById<TextView>(R.id.status_text).text = getString(R.string.status_permission_denied)
+        when (requestCode) {
+            REQUEST_CODE_PERMISSION -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Log.i(TAG, "Photo permission granted")
+                    updateStatusText(findViewById(R.id.status_text), SyncPreferences(this))
+                } else {
+                    Log.w(TAG, "Photo permission denied")
+                    findViewById<TextView>(R.id.status_text).text = getString(R.string.status_permission_denied)
+                }
+            }
+            REQUEST_CODE_NOTIFICATION_PERMISSION -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Log.i(TAG, "Notification permission granted")
+                } else {
+                    Log.i(TAG, "Notification permission denied — update notifications will not be shown")
+                }
             }
         }
     }
@@ -117,9 +146,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateBanner(banner: TextView, prefs: SyncPreferences) {
+        val latestVersion = prefs.latestVersionAvailable
+        if (latestVersion != null) {
+            banner.text = getString(R.string.update_available_banner, latestVersion)
+            banner.visibility = View.VISIBLE
+        } else {
+            banner.visibility = View.GONE
+        }
+    }
+
     companion object {
         private const val TAG = "MainActivity"
         private const val REQUEST_CODE_PERMISSION = 1001
+        private const val REQUEST_CODE_NOTIFICATION_PERMISSION = 1002
         private const val IMMEDIATE_SYNC_WORK_NAME = "photo_sync_immediate"
     }
 }

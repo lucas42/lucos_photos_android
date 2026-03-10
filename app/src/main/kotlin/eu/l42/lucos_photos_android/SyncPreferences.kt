@@ -47,9 +47,26 @@ class SyncPreferences(context: Context) {
             prefs.edit().putLong(KEY_LAST_SYNC_COMPLETED_AT_MS, value).apply()
         }
 
+    /**
+     * The latest version reported by the server's `/api/app/latest` endpoint, or null if the
+     * last check found no mismatch (or the check has never run / failed).
+     *
+     * Non-null means the running version differs from the latest — the UI should show a banner
+     * and a notification should have been posted.
+     *
+     * Stored as an empty string to represent "no update available" (SharedPreferences cannot
+     * store null directly without a fallback; we treat blank as null).
+     */
+    var latestVersionAvailable: String?
+        get() = prefs.getString(KEY_LATEST_VERSION_AVAILABLE, "")?.ifBlank { null }
+        set(value) {
+            prefs.edit().putString(KEY_LATEST_VERSION_AVAILABLE, value ?: "").apply()
+        }
+
     companion object {
         private const val PREFS_NAME = "lucos_photos_sync"
         private const val KEY_LAST_SYNC_TIMESTAMP_MS = "last_sync_timestamp_ms"
         private const val KEY_LAST_SYNC_COMPLETED_AT_MS = "last_sync_completed_at_ms"
+        private const val KEY_LATEST_VERSION_AVAILABLE = "latest_version_available"
     }
 }

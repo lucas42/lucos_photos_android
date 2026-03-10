@@ -17,6 +17,8 @@ import kotlinx.coroutines.withContext
  * 2. Uploads each new photo to the server via [PhotoUploader].
  * 3. Updates the last sync timestamp after each successful upload to avoid re-uploading.
  * 4. Reports a telemetry event to the server after each sync run via [TelemetryReporter].
+ * 5. Checks whether a newer version of the app is available via [VersionChecker] and, if so,
+ *    stores the latest version in [SyncPreferences] and posts a notification via [UpdateNotifier].
  *
  * On network failure, WorkManager's built-in exponential backoff retry handles rescheduling.
  * The server handles deduplication via SHA256, so re-uploading a photo is harmless.
@@ -27,6 +29,8 @@ class PhotoSyncWorker(
     private val uploader: PhotoUploader = PhotoUploader(),
     private val syncPrefs: SyncPreferences = SyncPreferences(context),
     private val telemetry: TelemetryReporter = TelemetryReporter(),
+    private val versionChecker: VersionChecker = VersionChecker(),
+    private val updateNotifier: UpdateNotifier = UpdateNotifier(context),
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -114,6 +118,9 @@ class PhotoSyncWorker(
 
         val durationMs = System.currentTimeMillis() - syncStartMs
 
+        // Check for app updates regardless of sync outcome — best-effort, never affects result.
+        checkForUpdate()
+
         if (anyRetryableFailure) {
             Log.i(TAG, "Sync incomplete — scheduling retry via WorkManager backoff")
             telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = false)
@@ -123,6 +130,28 @@ class PhotoSyncWorker(
             syncPrefs.lastSyncCompletedAtMs = System.currentTimeMillis()
             telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = true)
             Result.success()
+        }
+    }
+
+    /**
+     * Checks whether a newer version of the app is available and updates [SyncPreferences] and
+     * posts a notification if so. Errors are silently absorbed — a version check failure must
+     * never affect the sync result.
+     */
+    private fun checkForUpdate() {
+        when (val result = versionChecker.check()) {
+            is VersionChecker.CheckResult.UpdateAvailable -> {
+                syncPrefs.latestVersionAvailable = result.latestVersion
+                updateNotifier.notifyUpdateAvailable(result.latestVersion)
+            }
+            is VersionChecker.CheckResult.UpToDate -> {
+                // Clear any previously stored mismatch — app is now up to date.
+                syncPrefs.latestVersionAvailable = null
+            }
+            is VersionChecker.CheckResult.CheckFailed -> {
+                // Leave the stored value unchanged — we can't tell whether an update is available.
+                Log.d(TAG, "Version check failed: ${result.reason}")
+            }
         }
     }
 

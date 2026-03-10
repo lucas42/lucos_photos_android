@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <!--
+        POST_NOTIFICATIONS is required on API 33+ to post system notifications.
+        Used to alert the user when a newer version of the app is available.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
         WAKE_LOCK allows WorkManager to keep the device awake while a background sync is running.
         WorkManager's own AAR includes this in its manifest merge, but declaring it explicitly
         here is the safe and recommended approach to ensure syncs aren't interrupted mid-way
