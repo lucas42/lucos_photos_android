@@ -76,8 +76,6 @@ workflows:
     jobs:
       - test
       - build-apk:
-          requires:
-            - test
           filters:
             branches:
               ignore:
