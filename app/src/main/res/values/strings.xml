@@ -6,4 +6,5 @@
     <string name="status_last_synced">Last synced: %1$s</string>
     <string name="status_syncing">Syncing…</string>
     <string name="status_permission_denied">Permission denied — cannot access photos</string>
+    <string name="version_label">v%1$s</string>
 </resources>

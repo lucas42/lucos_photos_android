@@ -40,7 +40,10 @@ class MainActivity : AppCompatActivity() {
 
         val statusText = findViewById<TextView>(R.id.status_text)
         val syncButton = findViewById<Button>(R.id.sync_now_button)
+        val versionText = findViewById<TextView>(R.id.version_text)
         val prefs = SyncPreferences(this)
+
+        versionText.text = getString(R.string.version_label, BuildConfig.VERSION_NAME)
 
         updateStatusText(statusText, prefs)
 

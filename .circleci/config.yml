@@ -2,6 +2,8 @@
 # sideloaded Android APK rather than a Docker image pushed to a registry. There is no
 # deploy step — the APK is stored as a CI artifact and signed + installed manually.
 version: 2.1
+orbs:
+  lucos: lucos/deploy@0
 jobs:
   test:
     docker:
@@ -22,7 +24,7 @@ jobs:
       - store_artifacts:
           path: app/build/outputs/apk/release
           destination: apk
-  production-build-apk:
+  release-apk:
     docker:
       - image: cimg/android:2025.01
     steps:
@@ -30,14 +32,12 @@ jobs:
       - add_ssh_keys:
           fingerprints:
             - "b7:75:7e:64:66:44:40:06:95:b4:ad:cd:07:a7:6f:08"
-      - run:
-          name: Populate known_hosts
-          command: |
-            ssh-keyscan -p 2202 -H creds.l42.eu >> ~/.ssh/known_hosts
+      - lucos/fetch-publish-creds
       - run:
           name: Fetch production envfile
           command: |
             scp -s -P 2202 -o BatchMode=yes docker-deploy@creds.l42.eu:$CIRCLE_PROJECT_REPONAME/production/.env .
+      - lucos/calc-version
       - run:
           name: Decode keystore
           command: |
@@ -46,8 +46,10 @@ jobs:
       - run:
           name: Build and sign release APK
           command: |
+            source $BASH_ENV
             set -a && source .env && set +a
             export ANDROID_KEYSTORE_FILE=/tmp/lucos-photos.keystore
+            export APP_VERSION=$NEXT_VERSION
             ./gradlew assembleRelease
       - run:
           name: Remove keystore
@@ -68,7 +70,7 @@ workflows:
             branches:
               ignore:
                 - main
-      - production-build-apk:
+      - release-apk:
           requires:
             - test
           filters:

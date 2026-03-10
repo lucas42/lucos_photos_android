@@ -34,6 +34,21 @@ val signingKeyPassword = System.getenv("ANDROID_KEY_PASSWORD").takeIf { !it.isNu
     ?: signingStorePassword
 val ciApiKey = System.getenv("KEY_LUCOS_PHOTOS")
 
+// Read the app version from the APP_VERSION environment variable (set by semantic-release in CI).
+// Falls back to "dev" for local builds where the version hasn't been calculated yet.
+val appVersionName = System.getenv("APP_VERSION")?.takeIf { it.isNotBlank() } ?: "dev"
+
+// Derive a monotonically increasing integer versionCode from the semver string.
+// For a version like "1.2.3", this produces 10203 (major*10000 + minor*100 + patch).
+// For non-semver values (e.g. "dev" in local builds), falls back to 1.
+val appVersionCode = run {
+    val parts = appVersionName.split(".").mapNotNull { it.toIntOrNull() }
+    if (parts.size >= 3) parts[0] * 10000 + parts[1] * 100 + parts[2]
+    else if (parts.size == 2) parts[0] * 10000 + parts[1] * 100
+    else if (parts.size == 1) parts[0] * 10000
+    else 1
+}
+
 android {
     namespace = "eu.l42.lucos_photos_android"
     compileSdk = 36
@@ -42,8 +57,8 @@ android {
         applicationId = "eu.l42.lucos_photos_android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
