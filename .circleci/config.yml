@@ -55,6 +55,18 @@ jobs:
           name: Remove keystore
           command: rm -f /tmp/lucos-photos.keystore
           when: always
+      - run:
+          name: Upload APK to GitHub Release
+          command: |
+            source $BASH_ENV
+            APK_PATH="app/build/outputs/apk/release/app-release.apk"
+            RELEASE_ID=$(curl -sf -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/tags/v$NEXT_VERSION" \
+              | jq -r '.id')
+            curl -sf -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              --data-binary @"$APK_PATH" \
+              "https://uploads.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/$RELEASE_ID/assets?name=lucos-photos-v$NEXT_VERSION.apk"
       - store_artifacts:
           path: app/build/outputs/apk/release
           destination: apk
