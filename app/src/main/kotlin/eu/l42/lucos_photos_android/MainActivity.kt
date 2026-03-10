@@ -117,11 +117,11 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
             REQUEST_CODE_PERMISSION -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    Log.i(TAG, "Photo permission granted")
+                if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    Log.i(TAG, "Media permissions granted")
                     updateStatusText(findViewById(R.id.status_text), SyncPreferences(this))
                 } else {
-                    Log.w(TAG, "Photo permission denied")
+                    Log.w(TAG, "One or more media permissions denied")
                     findViewById<TextView>(R.id.status_text).text = getString(R.string.status_permission_denied)
                 }
             }
