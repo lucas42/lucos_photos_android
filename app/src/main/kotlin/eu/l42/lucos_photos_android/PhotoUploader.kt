@@ -136,7 +136,12 @@ class PhotoUploader(
         private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(120, TimeUnit.SECONDS)
+            // Write timeout is disabled (0 = no timeout) because photo uploads can be arbitrarily
+            // large. OkHttp's write timeout applies per socket write operation — on a slow mobile
+            // connection, a single write for a large photo (e.g. 20–50 MB) can exceed any fixed
+            // limit and cause the upload to abort mid-stream. The connect timeout still bounds
+            // initial connection establishment; the read timeout still bounds the server's response.
+            .writeTimeout(0, TimeUnit.SECONDS)
             .build()
     }
 }
