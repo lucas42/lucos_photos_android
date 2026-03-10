@@ -28,8 +28,11 @@ class PhotoUploader(
      * Result of an upload attempt.
      */
     sealed class UploadResult {
-        /** Photo successfully uploaded (HTTP 201) or already existed (HTTP 200). */
+        /** Photo was new and successfully uploaded (HTTP 201). */
         data object Success : UploadResult()
+
+        /** Photo already exists on the server (HTTP 200 — SHA256 deduplication). */
+        data object AlreadyUploaded : UploadResult()
 
         /**
          * Upload failed due to a configuration problem (HTTP 401 or 403).
@@ -40,16 +43,22 @@ class PhotoUploader(
          * sync timestamp past it. If we advanced the timestamp on a 401, every photo in
          * the current window would be permanently lost from the sync backlog even after
          * the API key is corrected.
+         *
+         * [errorKey] is the HTTP status code as a string (e.g. "401"), used for grouping
+         * errors in telemetry.
          */
-        data class AuthFailure(val message: String) : UploadResult()
+        data class AuthFailure(val message: String, val errorKey: String) : UploadResult()
 
         /**
          * Upload failed. If [retryable] is true, WorkManager's retry mechanism should
          * be relied upon to retry later. Non-retryable failures (e.g. storage full) are
          * logged but skipped — the photo is not retried and the sync timestamp advances
          * past it.
+         *
+         * [errorKey] is the HTTP status code as a string (e.g. "413"), or "network" for
+         * IO failures. Used for grouping errors in telemetry.
          */
-        data class Failure(val message: String, val retryable: Boolean) : UploadResult()
+        data class Failure(val message: String, val retryable: Boolean, val errorKey: String) : UploadResult()
     }
 
     /**
@@ -101,34 +110,39 @@ class PhotoUploader(
         return try {
             httpClient.newCall(request).execute().use { response ->
                 when {
-                    response.code == 200 || response.code == 201 -> UploadResult.Success
+                    response.code == 201 -> UploadResult.Success
+                    response.code == 200 -> UploadResult.AlreadyUploaded
                     response.code == 401 || response.code == 403 -> {
                         UploadResult.AuthFailure(
-                            "Authentication failed (HTTP ${response.code}) — check API key",
+                            message = "Authentication failed (HTTP ${response.code}) — check API key",
+                            errorKey = response.code.toString(),
                         )
                     }
                     response.code == 507 -> {
                         UploadResult.Failure(
-                            "Server storage full (HTTP 507)",
+                            message = "Server storage full (HTTP 507)",
                             retryable = false,
+                            errorKey = "507",
                         )
                     }
                     response.code >= 500 -> {
                         UploadResult.Failure(
-                            "Server error (HTTP ${response.code})",
+                            message = "Server error (HTTP ${response.code})",
                             retryable = true,
+                            errorKey = response.code.toString(),
                         )
                     }
                     else -> {
                         UploadResult.Failure(
-                            "Unexpected response (HTTP ${response.code})",
+                            message = "Unexpected response (HTTP ${response.code})",
                             retryable = false,
+                            errorKey = response.code.toString(),
                         )
                     }
                 }
             }
         } catch (e: IOException) {
-            UploadResult.Failure("Network error: ${e.message}", retryable = true)
+            UploadResult.Failure(message = "Network error: ${e.message}", retryable = true, errorKey = "network")
         }
     }
 

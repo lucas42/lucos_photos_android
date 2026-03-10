@@ -33,17 +33,34 @@ class TelemetryReporter(
     /**
      * Reports a sync run outcome to the telemetry endpoint.
      *
-     * @param durationMs     Total elapsed time of the sync run in milliseconds.
-     * @param photosSynced   Number of photos successfully uploaded.
-     * @param errors         Number of upload failures (retryable or non-retryable) encountered.
-     * @param succeeded      Whether the sync completed fully (true) or was retried (false).
+     * @param durationMs      Total elapsed time of the sync run in milliseconds.
+     * @param itemsFound      Total number of media items returned by the MediaStore query.
+     * @param photosSynced    Number of items successfully uploaded as new (HTTP 201).
+     * @param alreadyUploaded Number of items already present on the server (HTTP 200).
+     * @param errors          Number of upload failures (retryable or non-retryable) encountered.
+     * @param errorBreakdown  Map of error key (HTTP status code string or "network"/"stream"/
+     *                        "exception") to count of items that failed with that error.
+     * @param succeeded       Whether the sync completed fully (true) or was retried (false).
      */
-    fun reportSync(durationMs: Long, photosSynced: Int, errors: Int, succeeded: Boolean) {
+    fun reportSync(
+        durationMs: Long,
+        itemsFound: Int,
+        photosSynced: Int,
+        alreadyUploaded: Int,
+        errors: Int,
+        errorBreakdown: Map<String, Int>,
+        succeeded: Boolean,
+    ) {
         val eventType = if (succeeded) "sync_completed" else "sync_failed"
         val data = JSONObject().apply {
             put("duration_ms", durationMs)
+            put("items_found", itemsFound)
             put("photos_synced", photosSynced)
+            put("already_uploaded", alreadyUploaded)
             put("errors", errors)
+            if (errorBreakdown.isNotEmpty()) {
+                put("error_breakdown", JSONObject(errorBreakdown))
+            }
         }
         sendEvent(eventType, data)
     }
