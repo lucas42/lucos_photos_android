@@ -6,8 +6,8 @@ import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
 
 /**
- * Custom [WorkerFactory] that injects [PhotoUploader] and [SyncPreferences] into
- * [PhotoSyncWorker] at construction time.
+ * Custom [WorkerFactory] that injects [PhotoUploader], [SyncPreferences], and
+ * [TelemetryReporter] into [PhotoSyncWorker] at construction time.
  *
  * WorkManager's default reflection-based factory only knows about the standard two-argument
  * (Context, WorkerParameters) constructor. By registering this factory we can supply the
@@ -16,6 +16,7 @@ import androidx.work.WorkerParameters
 class PhotoSyncWorkerFactory(
     private val uploader: PhotoUploader,
     private val prefs: SyncPreferences,
+    private val telemetry: TelemetryReporter = TelemetryReporter(),
 ) : WorkerFactory() {
 
     override fun createWorker(
@@ -24,7 +25,7 @@ class PhotoSyncWorkerFactory(
         workerParameters: WorkerParameters,
     ): ListenableWorker? {
         return if (workerClassName == PhotoSyncWorker::class.java.name) {
-            PhotoSyncWorker(appContext, workerParameters, uploader, prefs)
+            PhotoSyncWorker(appContext, workerParameters, uploader, prefs, telemetry)
         } else {
             // Return null to let the default factory handle unknown worker classes
             null
