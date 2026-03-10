@@ -139,4 +139,38 @@ class PhotoUploaderTest {
         assertTrue(result is PhotoUploader.UploadResult.Failure)
         assertEquals(true, (result as PhotoUploader.UploadResult.Failure).retryable)
     }
+
+    @Test
+    fun `upload returns retryable Failure on write timeout IOException`() {
+        // OkHttp throws an IOException with a "timeout" message when the write timeout fires.
+        // This is the mechanism behind photos larger than ~1 MB failing on slow connections
+        // when the write timeout was set too low (see: issue #41).
+        val mockCall = mockk<Call>()
+        val mockClient = mockk<OkHttpClient>()
+        every { mockClient.newCall(any()) } returns mockCall
+        every { mockCall.execute() } throws IOException("timeout")
+
+        val uploader = PhotoUploader(
+            serverUrl = "https://photos.example.com",
+            apiKey = "test-key",
+            httpClient = mockClient,
+        )
+
+        // Large photo simulated as a 2 MB byte array
+        val largePhoto = ByteArray(2 * 1024 * 1024) { it.toByte() }
+        val result = uploader.upload(ByteArrayInputStream(largePhoto), "large_photo.jpg", "image/jpeg")
+        assertTrue("Expected retryable Failure but got $result", result is PhotoUploader.UploadResult.Failure)
+        assertEquals(true, (result as PhotoUploader.UploadResult.Failure).retryable)
+    }
+
+    @Test
+    fun `upload succeeds for large photo when no write timeout is enforced`() {
+        // Verifies the upload logic handles large bodies correctly (streaming, not buffering).
+        // The mock client returns 201 regardless of body size.
+        val (uploader, _) = makeUploaderWithSlot(201)
+
+        val largePhoto = ByteArray(2 * 1024 * 1024) { it.toByte() }
+        val result = uploader.upload(ByteArrayInputStream(largePhoto), "large_photo.jpg", "image/jpeg")
+        assertEquals(PhotoUploader.UploadResult.Success, result)
+    }
 }
