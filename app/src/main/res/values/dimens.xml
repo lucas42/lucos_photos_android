@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Decorative bottom padding for the version text, applied on top of the navigation bar inset -->
+    <dimen name="version_text_bottom_padding">8dp</dimen>
+</resources>
