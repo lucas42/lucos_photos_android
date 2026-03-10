@@ -7,4 +7,9 @@
     <string name="status_syncing">Syncing…</string>
     <string name="status_permission_denied">Permission denied — cannot access photos</string>
     <string name="version_label">v%1$s</string>
+    <string name="update_available_banner">A newer version (%1$s) is available — please update the app</string>
+    <string name="update_notification_title">App update available</string>
+    <string name="update_notification_text">Version %1$s of lucOS Photos Backup is available</string>
+    <string name="update_channel_name">App updates</string>
+    <string name="update_channel_description">Alerts when a newer version of the app is available</string>
 </resources>

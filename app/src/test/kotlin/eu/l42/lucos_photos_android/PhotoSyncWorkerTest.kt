@@ -376,4 +376,74 @@ class PhotoSyncWorkerTest {
             mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true)
         }
     }
+
+    @Test
+    fun `worker cancels update notification when version check returns UpToDate`() = runBlocking {
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockPrefs.latestVersionAvailable = any() } returns Unit
+
+        val mockVersionChecker = mockk<VersionChecker>()
+        every { mockVersionChecker.check() } returns VersionChecker.CheckResult.UpToDate
+
+        val mockUpdateNotifier = mockk<UpdateNotifier>(relaxed = true)
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(
+                PhotoSyncWorkerFactory(
+                    mockUploader,
+                    mockPrefs,
+                    mockTelemetry,
+                    mockVersionChecker,
+                    updateNotifierFactory = { mockUpdateNotifier },
+                )
+            )
+            .build()
+
+        worker.doWork()
+
+        // When UpToDate, the stored version preference must be cleared
+        verify(exactly = 1) { mockPrefs.latestVersionAvailable = null }
+        // And the stale notification must be cancelled so it doesn't linger in the shade
+        verify(exactly = 1) { mockUpdateNotifier.cancelUpdateNotification() }
+        // notifyUpdateAvailable must NOT have been called — the app is up to date
+        verify(exactly = 0) { mockUpdateNotifier.notifyUpdateAvailable(any()) }
+    }
+
+    @Test
+    fun `worker posts notification when version check returns UpdateAvailable`() = runBlocking {
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockPrefs.latestVersionAvailable = any() } returns Unit
+
+        val mockVersionChecker = mockk<VersionChecker>()
+        every { mockVersionChecker.check() } returns VersionChecker.CheckResult.UpdateAvailable("2.0.0")
+
+        val mockUpdateNotifier = mockk<UpdateNotifier>(relaxed = true)
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(
+                PhotoSyncWorkerFactory(
+                    mockUploader,
+                    mockPrefs,
+                    mockTelemetry,
+                    mockVersionChecker,
+                    updateNotifierFactory = { mockUpdateNotifier },
+                )
+            )
+            .build()
+
+        worker.doWork()
+
+        // When UpdateAvailable, the latest version must be stored in preferences
+        verify(exactly = 1) { mockPrefs.latestVersionAvailable = "2.0.0" }
+        // And the notification must be posted
+        verify(exactly = 1) { mockUpdateNotifier.notifyUpdateAvailable("2.0.0") }
+        // cancelUpdateNotification must NOT be called — there's an update pending
+        verify(exactly = 0) { mockUpdateNotifier.cancelUpdateNotification() }
+    }
 }

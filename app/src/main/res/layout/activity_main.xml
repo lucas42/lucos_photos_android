@@ -5,6 +5,18 @@
     android:orientation="vertical"
     android:padding="24dp">
 
+    <!-- Update available banner — hidden until VersionChecker detects a mismatch -->
+    <TextView
+        android:id="@+id/update_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
+        android:background="#B00020"
+        android:gravity="center"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
