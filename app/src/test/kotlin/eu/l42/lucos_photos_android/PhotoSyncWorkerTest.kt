@@ -27,6 +27,9 @@ class PhotoSyncWorkerTest {
 
     private lateinit var context: Context
 
+    // A no-op mock telemetry reporter used across all tests to avoid real network calls.
+    private lateinit var mockTelemetry: TelemetryReporter
+
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
@@ -38,6 +41,8 @@ class PhotoSyncWorkerTest {
         //
         // TestListenableWorkerBuilder bypasses WorkManager entirely and instantiates the worker
         // directly via the supplied WorkerFactory, so WorkManager initialisation is not needed.
+
+        mockTelemetry = mockk(relaxed = true)
     }
 
     /**
@@ -116,7 +121,7 @@ class PhotoSyncWorkerTest {
         // Build a worker that uses our mocks but will query the (empty) Robolectric MediaStore
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
             .setWorkerFactory(
-                PhotoSyncWorkerFactory(mockUploader, mockPrefs)
+                PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry)
             )
             .build()
 
@@ -127,6 +132,8 @@ class PhotoSyncWorkerTest {
         verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
         // Sync completion timestamp must be written even when there are no new photos
         verify(exactly = 1) { mockPrefs.lastSyncCompletedAtMs = any() }
+        // Telemetry should be reported as succeeded with zero photos
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 0, succeeded = true) }
     }
 
     @Test
@@ -143,7 +150,7 @@ class PhotoSyncWorkerTest {
             PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key")
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         val result = worker.doWork()
@@ -155,6 +162,8 @@ class PhotoSyncWorkerTest {
         verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
+        // Telemetry should be reported as failed
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 1, succeeded = false) }
     }
 
     @Test
@@ -171,7 +180,7 @@ class PhotoSyncWorkerTest {
             PhotoUploader.UploadResult.Failure("Network error", retryable = true)
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         val result = worker.doWork()
@@ -181,6 +190,8 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
+        // Telemetry should be reported as failed
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 1, succeeded = false) }
     }
 
     @Test
@@ -202,7 +213,7 @@ class PhotoSyncWorkerTest {
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         worker.doWork()
@@ -229,7 +240,7 @@ class PhotoSyncWorkerTest {
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         worker.doWork()
@@ -271,7 +282,7 @@ class PhotoSyncWorkerTest {
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         val result = worker.doWork()
@@ -297,7 +308,7 @@ class PhotoSyncWorkerTest {
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         val result = worker.doWork()
@@ -324,7 +335,7 @@ class PhotoSyncWorkerTest {
         every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
-            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs))
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
             .build()
 
         val timeBefore = System.currentTimeMillis()
@@ -341,6 +352,28 @@ class PhotoSyncWorkerTest {
                     "Expected lastSyncCompletedAtMs ($ts) to be between $timeBefore and $timeAfter"
                 }
             }
+        }
+    }
+
+    @Test
+    fun `worker reports telemetry with correct photo count after successful sync`() = runBlocking {
+        seedMediaStoreWithPhoto(id = 1L, displayName = "photo.jpg", dateAddedSeconds = 5000L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        worker.doWork()
+
+        verify(exactly = 1) {
+            mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true)
         }
     }
 }

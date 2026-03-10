@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
  * 1. Queries MediaStore for photos added after the last successful sync timestamp.
  * 2. Uploads each new photo to the server via [PhotoUploader].
  * 3. Updates the last sync timestamp after each successful upload to avoid re-uploading.
+ * 4. Reports a telemetry event to the server after each sync run via [TelemetryReporter].
  *
  * On network failure, WorkManager's built-in exponential backoff retry handles rescheduling.
  * The server handles deduplication via SHA256, so re-uploading a photo is harmless.
@@ -25,10 +26,13 @@ class PhotoSyncWorker(
     params: WorkerParameters,
     private val uploader: PhotoUploader = PhotoUploader(),
     private val syncPrefs: SyncPreferences = SyncPreferences(context),
+    private val telemetry: TelemetryReporter = TelemetryReporter(),
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         Log.i(TAG, "Starting photo sync")
+
+        val syncStartMs = System.currentTimeMillis()
 
         val lastSyncMs = syncPrefs.lastSyncTimestampMs
         // MediaStore DATE_ADDED is in seconds since epoch; convert for comparison
@@ -40,6 +44,8 @@ class PhotoSyncWorker(
         Log.i(TAG, "Found ${photos.size} new photo(s) to upload")
 
         var anyRetryableFailure = false
+        var photosSynced = 0
+        var errors = 0
 
         for ((index, photo) in photos.withIndex()) {
             Log.d(TAG, "Uploading photo: ${photo.displayName} (id=${photo.id})")
@@ -62,6 +68,7 @@ class PhotoSyncWorker(
 
             when (result) {
                 is PhotoUploader.UploadResult.Success -> {
+                    photosSynced++
                     Log.i(TAG, "Successfully uploaded photo ${photo.id} (${photo.displayName})")
                     // Only advance the sync timestamp once all photos at this DATE_ADDED second
                     // have been processed. DATE_ADDED has one-second granularity, so advancing to
@@ -80,11 +87,13 @@ class PhotoSyncWorker(
                     // will affect every photo — not just this one. Do NOT advance the sync
                     // timestamp. Instead, stop the batch and schedule a retry so that once the
                     // key is corrected, all photos in the current window are still uploaded.
+                    errors++
                     Log.e(TAG, "Auth failure uploading photo ${photo.id}: ${result.message} — stopping batch, will retry")
                     anyRetryableFailure = true
                     break
                 }
                 is PhotoUploader.UploadResult.Failure -> {
+                    errors++
                     Log.w(TAG, "Failed to upload photo ${photo.id}: ${result.message} (retryable=${result.retryable})")
                     if (result.retryable) {
                         anyRetryableFailure = true
@@ -103,12 +112,16 @@ class PhotoSyncWorker(
             }
         }
 
+        val durationMs = System.currentTimeMillis() - syncStartMs
+
         if (anyRetryableFailure) {
             Log.i(TAG, "Sync incomplete — scheduling retry via WorkManager backoff")
+            telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = false)
             Result.retry()
         } else {
             Log.i(TAG, "Sync complete")
             syncPrefs.lastSyncCompletedAtMs = System.currentTimeMillis()
+            telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = true)
             Result.success()
         }
     }
