@@ -1,8 +1,10 @@
 package eu.l42.lucos_photos_android
 
+import android.util.Log
 import io.mockk.CapturingSlot
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.verify
 import okhttp3.Call
@@ -16,10 +18,20 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import java.io.IOException
 
 class TelemetryReporterTest {
+
+    @Before
+    fun stubAndroidLog() {
+        mockkStatic(Log::class)
+        every { Log.d(any(), any()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
+        every { Log.e(any(), any()) } returns 0
+        every { Log.i(any(), any()) } returns 0
+    }
 
     private fun makeResponse(code: Int, request: Request): Response = Response.Builder()
         .code(code)
