@@ -67,6 +67,8 @@ jobs:
               -H "Content-Type: application/vnd.android.package-archive" \
               --data-binary @"$APK_PATH" \
               "https://uploads.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/releases/$RELEASE_ID/assets?name=lucos-photos-v$NEXT_VERSION.apk"
+      - lucos/loganne-publish:
+          tech: "GitHub Release"
 workflows:
   version: 2
   build-deploy:
