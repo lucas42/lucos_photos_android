@@ -2,7 +2,10 @@ package eu.l42.lucos_photos_android
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -21,11 +24,21 @@ class UpdateNotifier(private val context: Context) {
      * Safe to call repeatedly with the same [latestVersion] — Android will silently update the
      * existing notification rather than posting a duplicate.
      *
+     * Tapping the notification opens [MainActivity.APP_DOWNLOAD_URL] in the device browser.
+     *
      * @param latestVersion The version string reported by the server (e.g. "1.2.3").
      */
     fun notifyUpdateAvailable(latestVersion: String) {
         try {
             ensureChannelExists()
+
+            val openUrlIntent = Intent(Intent.ACTION_VIEW, Uri.parse(MainActivity.APP_DOWNLOAD_URL))
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                openUrlIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
 
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -33,6 +46,7 @@ class UpdateNotifier(private val context: Context) {
                 .setContentText(context.getString(R.string.update_notification_text, latestVersion))
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setAutoCancel(false)
+                .setContentIntent(pendingIntent)
                 .build()
 
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)

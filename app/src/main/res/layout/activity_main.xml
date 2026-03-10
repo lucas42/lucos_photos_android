@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    The root view uses fitSystemWindows="true" so the layout is aware of system bars.
+    However, we handle insets manually in MainActivity via ViewCompat.setOnApplyWindowInsetsListener
+    so we can apply them selectively (status bar padding at the top, navigation bar padding at the
+    bottom of the version text) rather than padding the entire root view symmetrically.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:orientation="vertical">
 
     <!-- Update available banner — hidden until VersionChecker detects a mismatch -->
     <TextView
@@ -15,6 +21,8 @@
         android:textColor="#FFFFFF"
         android:background="#B00020"
         android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"
         android:visibility="gone" />
 
     <LinearLayout
@@ -22,7 +30,8 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:gravity="center">
+        android:gravity="center"
+        android:padding="24dp">
 
         <TextView
             android:layout_width="wrap_content"
@@ -50,9 +59,11 @@
         android:id="@+id/version_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center"
+        android:gravity="end"
         android:textSize="12sp"
         android:textColor="#888888"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
         android:paddingBottom="8dp" />
 
 </LinearLayout>

@@ -1,16 +1,22 @@
 package eu.l42.lucos_photos_android
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
@@ -48,9 +54,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Opt in to edge-to-edge rendering so the app draws behind the status bar and
+        // navigation bar. We then apply window insets manually to individual views.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        val rootLayout = findViewById<LinearLayout>(R.id.root_layout)
         val statusText = findViewById<TextView>(R.id.status_text)
         val syncButton = findViewById<Button>(R.id.sync_now_button)
         val versionText = findViewById<TextView>(R.id.version_text)
@@ -61,6 +71,27 @@ class MainActivity : AppCompatActivity() {
 
         updateStatusText(statusText, prefs)
         updateBanner(updateBanner, prefs)
+
+        // Apply window insets so the banner sits below the status bar and the version
+        // text sits above the navigation bar. We apply the status bar inset as top padding
+        // on the root layout, and the navigation bar inset as additional bottom padding on
+        // the version text (on top of its existing 8dp decorative padding).
+        ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            rootLayout.setPadding(
+                rootLayout.paddingLeft,
+                systemBars.top,
+                rootLayout.paddingRight,
+                rootLayout.paddingBottom,
+            )
+            versionText.setPadding(
+                versionText.paddingLeft,
+                versionText.paddingTop,
+                versionText.paddingRight,
+                systemBars.bottom + resources.getDimensionPixelSize(R.dimen.version_text_bottom_padding),
+            )
+            insets
+        }
 
         syncButton.setOnClickListener {
             if (hasPermission()) {
@@ -164,8 +195,12 @@ class MainActivity : AppCompatActivity() {
         if (latestVersion != null) {
             banner.text = getString(R.string.update_available_banner, latestVersion)
             banner.visibility = View.VISIBLE
+            banner.setOnClickListener {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(APP_DOWNLOAD_URL)))
+            }
         } else {
             banner.visibility = View.GONE
+            banner.setOnClickListener(null)
         }
     }
 
@@ -174,5 +209,6 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_CODE_PERMISSION = 1001
         private const val REQUEST_CODE_NOTIFICATION_PERMISSION = 1002
         private const val IMMEDIATE_SYNC_WORK_NAME = "photo_sync_immediate"
+        internal const val APP_DOWNLOAD_URL = "https://photos.l42.eu/app"
     }
 }
