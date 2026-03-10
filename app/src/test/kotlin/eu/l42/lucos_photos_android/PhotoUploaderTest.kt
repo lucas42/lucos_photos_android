@@ -55,10 +55,10 @@ class PhotoUploaderTest {
     }
 
     @Test
-    fun `upload returns Success on HTTP 200 (duplicate)`() {
+    fun `upload returns AlreadyUploaded on HTTP 200 (duplicate)`() {
         val uploader = makeUploader(200)
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
-        assertEquals(PhotoUploader.UploadResult.Success, result)
+        assertEquals(PhotoUploader.UploadResult.AlreadyUploaded, result)
     }
 
     @Test
@@ -69,10 +69,24 @@ class PhotoUploaderTest {
     }
 
     @Test
+    fun `upload returns AuthFailure with errorKey on HTTP 401`() {
+        val uploader = makeUploader(401)
+        val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
+        assertEquals("401", (result as PhotoUploader.UploadResult.AuthFailure).errorKey)
+    }
+
+    @Test
     fun `upload returns AuthFailure on HTTP 403`() {
         val uploader = makeUploader(403)
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
         assertTrue("Expected AuthFailure but got $result", result is PhotoUploader.UploadResult.AuthFailure)
+    }
+
+    @Test
+    fun `upload returns AuthFailure with errorKey on HTTP 403`() {
+        val uploader = makeUploader(403)
+        val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
+        assertEquals("403", (result as PhotoUploader.UploadResult.AuthFailure).errorKey)
     }
 
     @Test
@@ -84,11 +98,28 @@ class PhotoUploaderTest {
     }
 
     @Test
+    fun `upload returns Failure with errorKey on HTTP 500`() {
+        val uploader = makeUploader(500)
+        val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
+        assertEquals("500", (result as PhotoUploader.UploadResult.Failure).errorKey)
+    }
+
+    @Test
+    fun `upload returns non-retryable Failure on HTTP 413`() {
+        val uploader = makeUploader(413)
+        val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
+        assertTrue(result is PhotoUploader.UploadResult.Failure)
+        assertEquals(false, (result as PhotoUploader.UploadResult.Failure).retryable)
+        assertEquals("413", result.errorKey)
+    }
+
+    @Test
     fun `upload returns non-retryable Failure on HTTP 507`() {
         val uploader = makeUploader(507)
         val result = uploader.upload(ByteArrayInputStream("fakedata".toByteArray()), "photo.jpg", "image/jpeg")
         assertTrue(result is PhotoUploader.UploadResult.Failure)
         assertEquals(false, (result as PhotoUploader.UploadResult.Failure).retryable)
+        assertEquals("507", (result as PhotoUploader.UploadResult.Failure).errorKey)
     }
 
     @Test

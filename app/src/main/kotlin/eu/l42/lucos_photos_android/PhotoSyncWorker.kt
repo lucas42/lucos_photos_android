@@ -54,11 +54,16 @@ class PhotoSyncWorker(
         val mediaItems = (photos + videos).sortedBy { it.dateAddedSeconds }
         Log.i(TAG, "Found ${mediaItems.size} new media item(s) to upload (${photos.size} photo(s), ${videos.size} video(s))")
 
+        val itemsFound = mediaItems.size
         var anyRetryableFailure = false
         // Note: this counter is named photosSynced for backwards compatibility with the
-        // telemetry schema — it now counts both photos and videos.
+        // telemetry schema — it now counts both photos and videos. Only HTTP 201 responses
+        // (genuinely new uploads) are counted; HTTP 200 (already on server) is tracked
+        // separately as alreadyUploaded.
         var photosSynced = 0
+        var alreadyUploaded = 0
         var errors = 0
+        val errorBreakdown = mutableMapOf<String, Int>()
 
         for ((index, item) in mediaItems.withIndex()) {
             Log.d(TAG, "Uploading media: ${item.displayName} (id=${item.id})")
@@ -73,10 +78,10 @@ class PhotoSyncWorker(
                         mimeType = item.mimeType,
                         dateTakenMs = item.dateTakenMs,
                     )
-                } ?: PhotoUploader.UploadResult.Failure("Could not open input stream", retryable = true)
+                } ?: PhotoUploader.UploadResult.Failure("Could not open input stream", retryable = true, errorKey = "stream")
             } catch (e: Exception) {
                 Log.e(TAG, "Exception uploading media ${item.id}", e)
-                PhotoUploader.UploadResult.Failure("Exception: ${e.message}", retryable = true)
+                PhotoUploader.UploadResult.Failure("Exception: ${e.message}", retryable = true, errorKey = "exception")
             }
 
             when (result) {
@@ -95,18 +100,29 @@ class PhotoSyncWorker(
                         syncPrefs.lastSyncTimestampMs = item.dateAddedSeconds * 1000L
                     }
                 }
+                is PhotoUploader.UploadResult.AlreadyUploaded -> {
+                    alreadyUploaded++
+                    Log.i(TAG, "Media ${item.id} (${item.displayName}) already on server — advancing timestamp")
+                    val nextItemInDifferentSecond = index + 1 >= mediaItems.size ||
+                            mediaItems[index + 1].dateAddedSeconds > item.dateAddedSeconds
+                    if (nextItemInDifferentSecond) {
+                        syncPrefs.lastSyncTimestampMs = item.dateAddedSeconds * 1000L
+                    }
+                }
                 is PhotoUploader.UploadResult.AuthFailure -> {
                     // An auth error (401/403) almost certainly means our API key is wrong, which
                     // will affect every item — not just this one. Do NOT advance the sync
                     // timestamp. Instead, stop the batch and schedule a retry so that once the
                     // key is corrected, all items in the current window are still uploaded.
                     errors++
+                    errorBreakdown[result.errorKey] = (errorBreakdown[result.errorKey] ?: 0) + 1
                     Log.e(TAG, "Auth failure uploading media ${item.id}: ${result.message} — stopping batch, will retry")
                     anyRetryableFailure = true
                     break
                 }
                 is PhotoUploader.UploadResult.Failure -> {
                     errors++
+                    errorBreakdown[result.errorKey] = (errorBreakdown[result.errorKey] ?: 0) + 1
                     Log.w(TAG, "Failed to upload media ${item.id}: ${result.message} (retryable=${result.retryable})")
                     if (result.retryable) {
                         anyRetryableFailure = true
@@ -132,12 +148,28 @@ class PhotoSyncWorker(
 
         if (anyRetryableFailure) {
             Log.i(TAG, "Sync incomplete — scheduling retry via WorkManager backoff")
-            telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = false)
+            telemetry.reportSync(
+                durationMs = durationMs,
+                itemsFound = itemsFound,
+                photosSynced = photosSynced,
+                alreadyUploaded = alreadyUploaded,
+                errors = errors,
+                errorBreakdown = errorBreakdown,
+                succeeded = false,
+            )
             Result.retry()
         } else {
             Log.i(TAG, "Sync complete")
             syncPrefs.lastSyncCompletedAtMs = System.currentTimeMillis()
-            telemetry.reportSync(durationMs = durationMs, photosSynced = photosSynced, errors = errors, succeeded = true)
+            telemetry.reportSync(
+                durationMs = durationMs,
+                itemsFound = itemsFound,
+                photosSynced = photosSynced,
+                alreadyUploaded = alreadyUploaded,
+                errors = errors,
+                errorBreakdown = errorBreakdown,
+                succeeded = true,
+            )
             Result.success()
         }
     }

@@ -177,7 +177,7 @@ class PhotoSyncWorkerTest {
         // Sync completion timestamp must be written even when there are no new items
         verify(exactly = 1) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as succeeded with zero items
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 0, succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
     }
 
     @Test
@@ -191,7 +191,7 @@ class PhotoSyncWorkerTest {
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
         // Auth failure — API key is wrong; the mock uploader will be called and return AuthFailure
         every { mockUploader.upload(any(), any(), any(), any()) } returns
-            PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key")
+            PhotoUploader.UploadResult.AuthFailure("Authentication failed (HTTP 401) — check API key", errorKey = "401")
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
             .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
@@ -207,7 +207,7 @@ class PhotoSyncWorkerTest {
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as failed
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 1, succeeded = false) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("401" to 1), succeeded = false) }
     }
 
     @Test
@@ -221,7 +221,7 @@ class PhotoSyncWorkerTest {
         every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
         // Retryable failure — e.g. network error; the mock uploader will be called
         every { mockUploader.upload(any(), any(), any(), any()) } returns
-            PhotoUploader.UploadResult.Failure("Network error", retryable = true)
+            PhotoUploader.UploadResult.Failure("Network error", retryable = true, errorKey = "network")
 
         val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
             .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
@@ -235,7 +235,34 @@ class PhotoSyncWorkerTest {
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as failed
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 1, succeeded = false) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("network" to 1), succeeded = false) }
+    }
+
+    @Test
+    fun `worker advances timestamp and reports alreadyUploaded on HTTP 200 duplicate`() = runBlocking {
+        // Seed a photo that the server reports as already uploaded (HTTP 200 deduplication).
+        seedMediaStoreWithPhoto(id = 1L, displayName = "duplicate_photo.jpg", dateAddedSeconds = 5000L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.AlreadyUploaded
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        val result = worker.doWork()
+        // Already-uploaded is not a failure — sync should succeed
+        assertEquals(ListenableWorker.Result.success(), result)
+        // Timestamp must advance so we don't re-query this photo next time
+        verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 5000L * 1000L }
+        // Telemetry: photosSynced=0 (not a new upload), alreadyUploaded=1
+        verify(exactly = 1) {
+            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 1, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        }
     }
 
     @Test
@@ -417,7 +444,7 @@ class PhotoSyncWorkerTest {
         worker.doWork()
 
         verify(exactly = 1) {
-            mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true)
+            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
         }
     }
 
@@ -445,7 +472,7 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) { mockUploader.upload(any(), eq("video.mp4"), eq("video/mp4"), any()) }
         // Sync timestamp should advance to the video's DATE_ADDED
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 8000L * 1000L }
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
     }
 
     @Test
@@ -471,7 +498,7 @@ class PhotoSyncWorkerTest {
         verify(exactly = 2) { mockUploader.upload(any(), any(), any(), any()) }
         // Timestamp should advance to the later item (the video at 9001s)
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 9001L * 1000L }
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 2, errors = 0, succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 2, photosSynced = 2, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
     }
 
     @Test
