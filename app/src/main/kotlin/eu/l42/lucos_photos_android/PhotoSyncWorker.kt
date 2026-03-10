@@ -147,6 +147,7 @@ class PhotoSyncWorker(
             is VersionChecker.CheckResult.UpToDate -> {
                 // Clear any previously stored mismatch — app is now up to date.
                 syncPrefs.latestVersionAvailable = null
+                updateNotifier.cancelUpdateNotification()
             }
             is VersionChecker.CheckResult.CheckFailed -> {
                 // Leave the stored value unchanged — we can't tell whether an update is available.

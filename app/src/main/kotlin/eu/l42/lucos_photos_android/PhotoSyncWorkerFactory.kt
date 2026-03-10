@@ -18,6 +18,7 @@ class PhotoSyncWorkerFactory(
     private val prefs: SyncPreferences,
     private val telemetry: TelemetryReporter = TelemetryReporter(),
     private val versionChecker: VersionChecker = VersionChecker(),
+    private val updateNotifierFactory: (Context) -> UpdateNotifier = { ctx -> UpdateNotifier(ctx) },
 ) : WorkerFactory() {
 
     override fun createWorker(
@@ -33,7 +34,7 @@ class PhotoSyncWorkerFactory(
                 prefs,
                 telemetry,
                 versionChecker,
-                UpdateNotifier(appContext),
+                updateNotifierFactory(appContext),
             )
         } else {
             // Return null to let the default factory handle unknown worker classes

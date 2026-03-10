@@ -45,6 +45,23 @@ class UpdateNotifier(private val context: Context) {
         }
     }
 
+    /**
+     * Cancels the "update available" notification if it is currently showing.
+     *
+     * Call this when the version check confirms the app is up to date, so stale notifications
+     * are dismissed automatically without requiring user action.
+     *
+     * Safe to call when no notification is showing — the cancel is a no-op in that case.
+     */
+    fun cancelUpdateNotification() {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            Log.i(TAG, "Update notification cancelled — app is up to date")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to cancel update notification: ${e.message}")
+        }
+    }
+
     /** Creates the notification channel if it does not already exist. */
     private fun ensureChannelExists() {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
