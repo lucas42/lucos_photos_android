@@ -166,12 +166,14 @@ class PhotoSyncWorker(
     }
 
     /**
-     * Queries MediaStore for photos with DATE_ADDED > [afterSeconds] that were taken by the
-     * device's camera (i.e. stored under DCIM/Camera/).
+     * Queries MediaStore for photos with DATE_ADDED > [afterSeconds] that are stored in the
+     * device's DCIM directory (i.e. camera-captured content).
      *
-     * We filter by RELATIVE_PATH (available since API 29 / Android 10) to exclude WhatsApp
-     * downloads, screenshots, social media cache, and any other images that happen to be on
-     * the device but were not captured by the camera app.
+     * We filter by RELATIVE_PATH (available since API 29 / Android 10) using a prefix match
+     * on "DCIM/" to capture camera roll items regardless of the specific subdirectory used
+     * by the device manufacturer (e.g. "DCIM/Camera/", "DCIM/100ANDRO/", etc.), while
+     * excluding WhatsApp downloads, screenshots, and other non-camera content stored
+     * under "Pictures/" or similar paths.
      */
     private fun queryNewPhotos(afterSeconds: Long): List<MediaEntry> {
         return queryNewMedia(
@@ -188,12 +190,13 @@ class PhotoSyncWorker(
     }
 
     /**
-     * Queries MediaStore for videos with DATE_ADDED > [afterSeconds] that were recorded by the
-     * device's camera (i.e. stored under DCIM/Camera/).
+     * Queries MediaStore for videos with DATE_ADDED > [afterSeconds] that are stored in the
+     * device's DCIM directory (i.e. camera-recorded content).
      *
-     * We filter by RELATIVE_PATH (available since API 29 / Android 10) to exclude WhatsApp
-     * downloads, social media cache, and any other videos that happen to be on the device but
-     * were not captured by the camera app.
+     * We filter by RELATIVE_PATH (available since API 29 / Android 10) using a prefix match
+     * on "DCIM/" to capture camera roll items regardless of the specific subdirectory used
+     * by the device manufacturer, while excluding WhatsApp downloads, social media cache,
+     * and other non-camera videos stored under "Pictures/" or similar paths.
      */
     private fun queryNewVideos(afterSeconds: Long): List<MediaEntry> {
         return queryNewMedia(
@@ -242,13 +245,15 @@ class PhotoSyncWorker(
             mimeTypeColumn,
             dateTakenColumn,
         )
-        // Restrict to items added after the last sync AND stored in the camera roll.
+        // Restrict to items added after the last sync AND stored somewhere under DCIM/.
         // RELATIVE_PATH (available since API 29 / Android 10) is the directory path relative
-        // to the storage volume root; it always ends with '/'.  Camera items are stored in
-        // "DCIM/Camera/" by the standard Android camera app.  Using an exact match avoids
-        // accidentally picking up paths like "DCIM/Camera_uploads/" (WhatsApp, etc.).
-        val selection = "$dateAddedColumn > ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-        val selectionArgs = arrayOf(afterSeconds.toString(), "DCIM/Camera/")
+        // to the storage volume root; it always ends with '/'.  Camera items are stored under
+        // DCIM/ by all standard Android camera apps, but the exact subdirectory varies by
+        // manufacturer (e.g. "DCIM/Camera/", "DCIM/100ANDRO/", "DCIM/Camera0/").
+        // Using LIKE 'DCIM/%' matches any subdirectory under DCIM/ while excluding
+        // "Pictures/WhatsApp Images/", "Pictures/Screenshots/", and similar non-camera paths.
+        val selection = "$dateAddedColumn > ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf(afterSeconds.toString(), "DCIM/%")
         val sortOrder = "$dateAddedColumn ASC"
 
         context.contentResolver.query(
