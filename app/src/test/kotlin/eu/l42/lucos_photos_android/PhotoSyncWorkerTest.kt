@@ -46,7 +46,7 @@ class PhotoSyncWorkerTest {
     }
 
     /**
-     * Pre-populates the Robolectric ContentResolver so that the worker's MediaStore query
+     * Pre-populates the Robolectric ContentResolver so that the worker's MediaStore image query
      * returns a fake photo, and openInputStream() returns fake bytes for that photo's URI.
      *
      * Robolectric does not register a real MediaProvider by default, so
@@ -66,7 +66,7 @@ class PhotoSyncWorkerTest {
      * always returns the pre-seeded cursor. This means the SQL filter
      * (RELATIVE_PATH = 'DCIM/Camera/' AND DATE_ADDED > ?) is NOT exercised by these tests —
      * it is enforced by MediaStore on a real device. These tests cover the worker's behaviour
-     * once photos are returned from the query (upload, retry, timestamp advancement, etc.).
+     * once items are returned from the query (upload, retry, timestamp advancement, etc.).
      *
      * @param id           The _ID to assign to the fake photo row. Must be unique per test.
      * @param displayName  The DISPLAY_NAME for the fake photo.
@@ -110,8 +110,52 @@ class PhotoSyncWorkerTest {
         shadowResolver.registerInputStream(photoUri, fakeStream)
     }
 
+    /**
+     * Pre-populates the Robolectric ContentResolver so that the worker's MediaStore video query
+     * returns a fake video, and openInputStream() returns fake bytes for that video's URI.
+     *
+     * Mirrors [seedMediaStoreWithPhoto] but uses [MediaStore.Video.Media.EXTERNAL_CONTENT_URI].
+     *
+     * @param id           The _ID to assign to the fake video row. Must be unique per test.
+     * @param displayName  The DISPLAY_NAME for the fake video.
+     * @param dateAddedSeconds  The DATE_ADDED value (epoch seconds) for the fake video.
+     * @param dateTakenMs  The DATE_TAKEN value (epoch milliseconds) for the fake video, or 0
+     *                     to simulate a video with no recorded taken-at time.
+     */
+    private fun seedMediaStoreWithVideo(
+        id: Long,
+        displayName: String,
+        dateAddedSeconds: Long,
+        dateTakenMs: Long = 0L,
+    ) {
+        val cursor = RoboCursor()
+        cursor.setColumnNames(
+            listOf(
+                MediaStore.Video.Media._ID,
+                MediaStore.Video.Media.DISPLAY_NAME,
+                MediaStore.Video.Media.DATE_ADDED,
+                MediaStore.Video.Media.MIME_TYPE,
+                MediaStore.Video.Media.DATE_TAKEN,
+            )
+        )
+        cursor.setResults(
+            arrayOf(
+                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs),
+            )
+        )
+
+        val shadowResolver = Shadows.shadowOf(context.contentResolver)
+        shadowResolver.setCursor(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cursor)
+
+        val videoUri = ContentUris.withAppendedId(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id
+        )
+        val fakeStream = ByteArrayInputStream("fake-mp4-bytes".toByteArray())
+        shadowResolver.registerInputStream(videoUri, fakeStream)
+    }
+
     @Test
-    fun `worker returns success when no new photos`() = runBlocking {
+    fun `worker returns success when no new photos or videos`() = runBlocking {
         val mockUploader = mockk<PhotoUploader>()
         val mockPrefs = mockk<SyncPreferences>()
         every { mockPrefs.lastSyncTimestampMs } returns 0L
@@ -130,9 +174,9 @@ class PhotoSyncWorkerTest {
 
         // No uploads should have occurred
         verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
-        // Sync completion timestamp must be written even when there are no new photos
+        // Sync completion timestamp must be written even when there are no new items
         verify(exactly = 1) { mockPrefs.lastSyncCompletedAtMs = any() }
-        // Telemetry should be reported as succeeded with zero photos
+        // Telemetry should be reported as succeeded with zero items
         verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 0, errors = 0, succeeded = true) }
     }
 
@@ -158,7 +202,7 @@ class PhotoSyncWorkerTest {
         assertEquals(ListenableWorker.Result.retry(), result)
         // The uploader must have been called (verifying we went through the upload path, not null-stream)
         verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
-        // The sync timestamp must NOT have been advanced — photos must still be in window
+        // The sync timestamp must NOT have been advanced — items must still be in window
         verify(exactly = 0) { mockPrefs.lastSyncTimestampMs = any() }
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
@@ -259,7 +303,7 @@ class PhotoSyncWorkerTest {
         // selection/selectionArgs — it does not actually filter rows. This test therefore
         // verifies the worker's timestamp-read → timestamp-advance path (not the SQL filter),
         // which is the critical invariant: lastSyncTimestampMs is read at the start of each run
-        // and advanced to the most-recently-processed photo's dateAddedSeconds after success.
+        // and advanced to the most-recently-processed item's dateAddedSeconds after success.
         //
         // The SQL filter (DATE_ADDED > ?) is verified indirectly: if the worker passed an
         // incorrect lastSyncSeconds to the query, the filtering behaviour would diverge from
@@ -317,7 +361,7 @@ class PhotoSyncWorkerTest {
         // The uploader must have been called with the seeded photo
         verify(exactly = 1) { mockUploader.upload(any(), any(), any(), any()) }
         // The sync timestamp must have been advanced to the photo's DATE_ADDED second (in ms).
-        // This verifies the core invariant: after a successful upload, photos before this timestamp
+        // This verifies the core invariant: after a successful upload, items before this timestamp
         // will not be re-queried on the next sync run.
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 5000L * 1000L }
     }
@@ -375,6 +419,85 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) {
             mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true)
         }
+    }
+
+    // ---- Video-specific tests ----
+
+    @Test
+    fun `worker uploads video from MediaStore Video collection`() = runBlocking {
+        // Seed a video — the worker should query Video Media and upload it
+        seedMediaStoreWithVideo(id = 10L, displayName = "video.mp4", dateAddedSeconds = 8000L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        val result = worker.doWork()
+        assertEquals(ListenableWorker.Result.success(), result)
+        // Uploader must have been called for the video with the correct filename and MIME type
+        verify(exactly = 1) { mockUploader.upload(any(), eq("video.mp4"), eq("video/mp4"), any()) }
+        // Sync timestamp should advance to the video's DATE_ADDED
+        verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 8000L * 1000L }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 1, errors = 0, succeeded = true) }
+    }
+
+    @Test
+    fun `worker uploads both photo and video when both are present`() = runBlocking {
+        // Seed both a photo and a video with different DATE_ADDED seconds
+        seedMediaStoreWithPhoto(id = 1L, displayName = "photo.jpg", dateAddedSeconds = 9000L)
+        seedMediaStoreWithVideo(id = 2L, displayName = "video.mp4", dateAddedSeconds = 9001L)
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        val result = worker.doWork()
+        assertEquals(ListenableWorker.Result.success(), result)
+        // Both items should have been uploaded
+        verify(exactly = 2) { mockUploader.upload(any(), any(), any(), any()) }
+        // Timestamp should advance to the later item (the video at 9001s)
+        verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 9001L * 1000L }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), photosSynced = 2, errors = 0, succeeded = true) }
+    }
+
+    @Test
+    fun `worker passes DATE_TAKEN for video to uploader`() = runBlocking {
+        val expectedDateTakenMs = 1_700_000_000_000L
+        seedMediaStoreWithVideo(
+            id = 10L,
+            displayName = "dated_video.mp4",
+            dateAddedSeconds = 8000L,
+            dateTakenMs = expectedDateTakenMs,
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>()
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+        every { mockPrefs.lastSyncTimestampMs = any() } returns Unit
+        every { mockPrefs.lastSyncCompletedAtMs = any() } returns Unit
+        every { mockUploader.upload(any(), any(), any(), any()) } returns PhotoUploader.UploadResult.Success
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        worker.doWork()
+
+        verify(exactly = 1) { mockUploader.upload(any(), any(), any(), expectedDateTakenMs) }
     }
 
     @Test

@@ -20,7 +20,8 @@ import androidx.work.WorkManager
  * Minimal launcher activity.
  *
  * Responsibilities:
- * - Request the READ_MEDIA_IMAGES (API 33+) or READ_EXTERNAL_STORAGE (API <33) permission
+ * - Request the READ_MEDIA_IMAGES + READ_MEDIA_VIDEO (API 33+) or READ_EXTERNAL_STORAGE (API <33)
+ *   permissions
  * - Show the current sync status
  * - Provide a "Sync now" button for manual triggering
  * - Show an update banner if a newer version is available (detected by the background sync)
@@ -30,10 +31,20 @@ import androidx.work.WorkManager
  */
 class MainActivity : AppCompatActivity() {
 
-    private val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_IMAGES
+    /**
+     * The media permissions required to read camera roll items.
+     *
+     * On Android 13+ (API 33), `READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO` are separate
+     * granular permissions — both are required to read photos and videos from the camera roll.
+     * On older versions, a single `READ_EXTERNAL_STORAGE` permission covers both.
+     */
+    private val requiredPermissions: Array<String> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+        )
     } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,10 +101,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasPermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, requiredPermission) == PackageManager.PERMISSION_GRANTED
+        requiredPermissions.all { permission ->
+            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        }
 
     private fun requestPermission() {
-        ActivityCompat.requestPermissions(this, arrayOf(requiredPermission), REQUEST_CODE_PERMISSION)
+        ActivityCompat.requestPermissions(this, requiredPermissions, REQUEST_CODE_PERMISSION)
     }
 
     override fun onRequestPermissionsResult(
