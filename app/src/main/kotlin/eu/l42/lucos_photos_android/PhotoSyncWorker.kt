@@ -276,6 +276,7 @@ class PhotoSyncWorker(
             dateAddedColumn,
             mimeTypeColumn,
             dateTakenColumn,
+            MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
         )
         // Restrict to items added after the last sync AND stored somewhere under DCIM/.
         // RELATIVE_PATH (available since API 29 / Android 10) is the directory path relative
@@ -284,8 +285,22 @@ class PhotoSyncWorker(
         // manufacturer (e.g. "DCIM/Camera/", "DCIM/100ANDRO/", "DCIM/Camera0/").
         // Using LIKE 'DCIM/%' matches any subdirectory under DCIM/ while excluding
         // "Pictures/WhatsApp Images/", "Pictures/Screenshots/", and similar non-camera paths.
-        val selection = "$dateAddedColumn > ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf(afterSeconds.toString(), "DCIM/%")
+        //
+        // Additionally exclude media owned by TikTok package names. TikTok saves downloaded
+        // videos to the camera roll rather than its own directory, so DCIM/ filtering alone
+        // is not sufficient. OWNER_PACKAGE_NAME is available at the same API level (29) as
+        // RELATIVE_PATH. Camera-captured content has a null owner package, which must be
+        // allowed through via the IS NULL check.
+        val selection = "$dateAddedColumn > ?" +
+            " AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" +
+            " AND (${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} IS NULL" +
+            " OR ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} NOT IN (?, ?))"
+        val selectionArgs = arrayOf(
+            afterSeconds.toString(),
+            "DCIM/%",
+            "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.trill",
+        )
         val sortOrder = "$dateAddedColumn ASC"
 
         context.contentResolver.query(
