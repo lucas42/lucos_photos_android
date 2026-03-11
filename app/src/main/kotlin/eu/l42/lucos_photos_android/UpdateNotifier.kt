@@ -5,7 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -32,7 +31,15 @@ class UpdateNotifier(private val context: Context) {
         try {
             ensureChannelExists()
 
-            val openUrlIntent = Intent(Intent.ACTION_VIEW, Uri.parse(MainActivity.APP_DOWNLOAD_URL))
+            // Use an explicit Intent targeting MainActivity rather than an implicit ACTION_VIEW
+            // intent. An implicit PendingIntent handed to NotificationManager can be redirected
+            // by a malicious component to an arbitrary destination. By targeting our own activity
+            // explicitly and passing the URL as an extra, we avoid this risk — MainActivity then
+            // opens the URL in the browser from within our own trusted code.
+            val openUrlIntent = Intent(context, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_OPEN_URL, MainActivity.APP_DOWNLOAD_URL)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 0,
