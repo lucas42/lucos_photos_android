@@ -192,13 +192,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBanner(banner: TextView, prefs: SyncPreferences) {
         val latestVersion = prefs.latestVersionAvailable
-        if (latestVersion != null) {
+        if (latestVersion != null && latestVersion != BuildConfig.VERSION_NAME) {
             banner.text = getString(R.string.update_available_banner, latestVersion)
             banner.visibility = View.VISIBLE
             banner.setOnClickListener {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(APP_DOWNLOAD_URL)))
             }
         } else {
+            if (latestVersion != null) {
+                // The stored version matches the currently installed version — the upgrade
+                // has been applied. Clear the stored value so it doesn't reappear on next open.
+                prefs.latestVersionAvailable = null
+            }
             banner.visibility = View.GONE
             banner.setOnClickListener(null)
         }
