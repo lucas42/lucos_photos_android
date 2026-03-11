@@ -54,6 +54,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // If this activity was launched from a notification carrying a URL extra (e.g. the
+        // "update available" notification), open the URL in the browser and finish so the
+        // user goes straight to the download page rather than seeing the main UI.
+        intent.getStringExtra(EXTRA_OPEN_URL)?.let { url ->
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            finish()
+            return
+        }
+
         // Opt in to edge-to-edge rendering so the app draws behind the status bar and
         // navigation bar. We then apply window insets manually to individual views.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -215,5 +224,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_CODE_NOTIFICATION_PERMISSION = 1002
         private const val IMMEDIATE_SYNC_WORK_NAME = "photo_sync_immediate"
         internal const val APP_DOWNLOAD_URL = "https://photos.l42.eu/app"
+        /** Intent extra key: when present, MainActivity opens this URL in the browser and exits. */
+        internal const val EXTRA_OPEN_URL = "eu.l42.lucos_photos_android.EXTRA_OPEN_URL"
     }
 }
