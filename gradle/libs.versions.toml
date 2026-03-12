@@ -1,6 +1,5 @@
 [versions]
-agp = "8.9.1"
-kotlin = "2.1.0"
+agp = "9.1.0"
 coreKtx = "1.17.0"
 appcompat = "1.7.1"
 workManager = "2.11.1"
@@ -24,4 +23,3 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
