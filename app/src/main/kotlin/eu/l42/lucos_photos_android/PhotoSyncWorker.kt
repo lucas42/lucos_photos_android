@@ -298,20 +298,15 @@ class PhotoSyncWorker(
         // The leading '%' handles any volume prefix while still requiring 'DCIM/' in the path,
         // correctly excluding "Pictures/WhatsApp Images/", "Pictures/Screenshots/", etc.
         //
-        // Additionally exclude media owned by TikTok package names. TikTok saves downloaded
-        // videos to the camera roll rather than its own directory, so DCIM/ filtering alone
-        // is not sufficient. OWNER_PACKAGE_NAME is available at the same API level (29) as
-        // RELATIVE_PATH. Camera-captured content has a null owner package, which must be
-        // allowed through via the IS NULL check.
+        // TikTok exclusion is applied in Kotlin (see cursor loop below) rather than as a SQL
+        // NOT IN clause. On some Android versions the MediaStore ContentProvider silently
+        // returns an empty cursor when NOT IN with bound parameters appears in the selection
+        // string, causing zero results with no error or exception.
         val selection = "$dateAddedColumn > ?" +
-            " AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" +
-            " AND (${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} IS NULL" +
-            " OR ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} NOT IN (?, ?))"
+            " AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
         val selectionArgs = arrayOf(
             afterSeconds.toString(),
             "%DCIM/%",
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trill",
         )
         val sortOrder = "$dateAddedColumn ASC"
 
@@ -329,14 +324,24 @@ class PhotoSyncWorker(
             val dateCol = cursor.getColumnIndexOrThrow(dateAddedColumn)
             val mimeCol = cursor.getColumnIndexOrThrow(mimeTypeColumn)
             val dateTakenCol = cursor.getColumnIndexOrThrow(dateTakenColumn)
+            val ownerPackageCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.OWNER_PACKAGE_NAME)
             val relativePathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
 
             while (cursor.moveToNext()) {
+                val ownerPackage = cursor.getString(ownerPackageCol)
+                // TikTok saves downloaded videos to the camera roll under DCIM/, so RELATIVE_PATH
+                // filtering alone is not sufficient to exclude them. We filter in Kotlin rather
+                // than SQL (NOT IN) because some Android versions silently return an empty cursor
+                // when NOT IN with bound parameters appears in the selection string.
+                if (ownerPackage in TIKTOK_PACKAGE_NAMES) {
+                    Log.d(TAG, "Skipping TikTok media: ${cursor.getString(nameCol)} (owner=$ownerPackage)")
+                    continue
+                }
                 // DATE_TAKEN is in milliseconds; it may be 0 for items with no recorded time.
                 // Treat 0 as absent (null) so we don't send a misleading epoch timestamp to the server.
                 val rawDateTaken = cursor.getLong(dateTakenCol)
                 val relativePath = cursor.getString(relativePathCol)
-                Log.d(TAG, "Found media: ${cursor.getString(nameCol)} relativePath=$relativePath owner=${cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.OWNER_PACKAGE_NAME))}")
+                Log.d(TAG, "Found media: ${cursor.getString(nameCol)} relativePath=$relativePath owner=$ownerPackage")
                 items.add(
                     MediaEntry(
                         id = cursor.getLong(idCol),
@@ -375,5 +380,11 @@ class PhotoSyncWorker(
 
     companion object {
         private const val TAG = "PhotoSyncWorker"
+
+        /** TikTok package names to exclude from the camera roll sync. */
+        private val TIKTOK_PACKAGE_NAMES = setOf(
+            "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.trill",
+        )
     }
 }
