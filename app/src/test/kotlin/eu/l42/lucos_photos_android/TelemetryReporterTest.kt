@@ -69,7 +69,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync sends sync_completed event on success`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 4200, itemsFound = 15, photosSynced = 15, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 4200, itemsFound = 15, photosFound = 15, videosFound = 0, photosSynced = 15, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val body = requestSlot.captured.body
         assertNotNull(body)
@@ -82,7 +82,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync sends sync_failed event on failure`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("network" to 1), succeeded = false)
+        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosFound = 1, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("network" to 1), relativePathSample = null, succeeded = false)
 
         val body = requestSlot.captured.body
         assertNotNull(body)
@@ -95,7 +95,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync includes app_version in payload`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 4200, itemsFound = 5, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 4200, itemsFound = 5, photosFound = 5, videosFound = 0, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -106,7 +106,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync includes timestamp in payload`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 4200, itemsFound = 5, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 4200, itemsFound = 5, photosFound = 5, videosFound = 0, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -119,7 +119,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync includes data with duration_ms photos_synced and errors`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 4200, itemsFound = 20, photosSynced = 15, alreadyUploaded = 2, errors = 3, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 4200, itemsFound = 20, photosFound = 18, videosFound = 2, photosSynced = 15, alreadyUploaded = 2, errors = 3, errorBreakdown = emptyMap(), relativePathSample = "DCIM/Camera/", succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -133,7 +133,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync includes items_found in data`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 42, photosSynced = 40, alreadyUploaded = 1, errors = 1, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 42, photosFound = 42, videosFound = 0, photosSynced = 40, alreadyUploaded = 1, errors = 1, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -145,7 +145,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync includes already_uploaded in data`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 10, photosSynced = 7, alreadyUploaded = 3, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 10, photosFound = 10, videosFound = 0, photosSynced = 7, alreadyUploaded = 3, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -160,10 +160,13 @@ class TelemetryReporterTest {
         reporter.reportSync(
             durationMs = 1000,
             itemsFound = 5,
+            photosFound = 5,
+            videosFound = 0,
             photosSynced = 3,
             alreadyUploaded = 0,
             errors = 2,
             errorBreakdown = mapOf("500" to 1, "network" to 1),
+            relativePathSample = null,
             succeeded = false,
         )
 
@@ -178,9 +181,46 @@ class TelemetryReporterTest {
     }
 
     @Test
+    fun `reportSync includes photos_found and videos_found in data`() {
+        val (reporter, requestSlot) = makeReporterWithSlot(201)
+        reporter.reportSync(durationMs = 1000, itemsFound = 7, photosFound = 5, videosFound = 2, photosSynced = 6, alreadyUploaded = 0, errors = 1, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
+
+        val buffer = okio.Buffer()
+        requestSlot.captured.body!!.writeTo(buffer)
+        val json = JSONObject(buffer.readUtf8())
+        val data = json.getJSONObject("data")
+        assertEquals(5, data.getInt("photos_found"))
+        assertEquals(2, data.getInt("videos_found"))
+    }
+
+    @Test
+    fun `reportSync includes relative_path_sample when present`() {
+        val (reporter, requestSlot) = makeReporterWithSlot(201)
+        reporter.reportSync(durationMs = 1000, itemsFound = 3, photosFound = 3, videosFound = 0, photosSynced = 3, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = "primary:DCIM/Camera/", succeeded = true)
+
+        val buffer = okio.Buffer()
+        requestSlot.captured.body!!.writeTo(buffer)
+        val json = JSONObject(buffer.readUtf8())
+        val data = json.getJSONObject("data")
+        assertEquals("primary:DCIM/Camera/", data.getString("relative_path_sample"))
+    }
+
+    @Test
+    fun `reportSync omits relative_path_sample when null`() {
+        val (reporter, requestSlot) = makeReporterWithSlot(201)
+        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
+
+        val buffer = okio.Buffer()
+        requestSlot.captured.body!!.writeTo(buffer)
+        val json = JSONObject(buffer.readUtf8())
+        val data = json.getJSONObject("data")
+        assertTrue("relative_path_sample should be absent when null", !data.has("relative_path_sample"))
+    }
+
+    @Test
     fun `reportSync omits error_breakdown when no errors`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 5, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 5, photosFound = 5, videosFound = 0, photosSynced = 5, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         val buffer = okio.Buffer()
         requestSlot.captured.body!!.writeTo(buffer)
@@ -192,7 +232,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync sends Authorization header with Bearer scheme`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosFound = 1, videosFound = 0, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         assertEquals("Bearer test-key", requestSlot.captured.header("Authorization"))
     }
@@ -200,7 +240,7 @@ class TelemetryReporterTest {
     @Test
     fun `reportSync posts to api telemetry endpoint`() {
         val (reporter, requestSlot) = makeReporterWithSlot(201)
-        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 1, photosFound = 1, videosFound = 0, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
 
         assertEquals("https://photos.example.com/api/telemetry", requestSlot.captured.url.toString())
     }
@@ -213,7 +253,7 @@ class TelemetryReporterTest {
     fun `reportSync does not throw on HTTP error response`() {
         val reporter = makeReporter(500)
         // Should not throw
-        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
     }
 
     @Test
@@ -230,7 +270,7 @@ class TelemetryReporterTest {
             httpClient = mockClient,
         )
         // Must not throw
-        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
     }
 
     @Test
@@ -247,7 +287,7 @@ class TelemetryReporterTest {
             httpClient = mockClient,
         )
         // Must not throw
-        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+        reporter.reportSync(durationMs = 1000, itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
     }
 
     // ---------------------------------------------------------------------------

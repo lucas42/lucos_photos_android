@@ -64,7 +64,7 @@ class PhotoSyncWorkerTest {
      *
      * Note: ShadowContentResolver ignores the selection/selectionArgs passed to query() and
      * always returns the pre-seeded cursor. This means the SQL filters
-     * (DATE_ADDED > ?, RELATIVE_PATH LIKE 'DCIM/%', OWNER_PACKAGE_NAME NOT IN TikTok packages)
+     * (DATE_ADDED > ?, RELATIVE_PATH LIKE '%DCIM/%', OWNER_PACKAGE_NAME NOT IN TikTok packages)
      * are NOT exercised by these tests — they are enforced by MediaStore on a real device.
      * These tests cover the worker's behaviour once items are returned from the query
      * (upload, retry, timestamp advancement, etc.).
@@ -82,7 +82,7 @@ class PhotoSyncWorkerTest {
         dateTakenMs: Long = 0L,
     ) {
         // Set up a RoboCursor that the worker's query() call will receive.
-        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN, OWNER_PACKAGE_NAME].
+        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN, OWNER_PACKAGE_NAME, RELATIVE_PATH].
         val cursor = RoboCursor()
         cursor.setColumnNames(
             listOf(
@@ -92,11 +92,12 @@ class PhotoSyncWorkerTest {
                 MediaStore.Images.Media.MIME_TYPE,
                 MediaStore.Images.Media.DATE_TAKEN,
                 MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, null),
+                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, null, "DCIM/Camera/"),
             )
         )
 
@@ -139,11 +140,12 @@ class PhotoSyncWorkerTest {
                 MediaStore.Video.Media.MIME_TYPE,
                 MediaStore.Video.Media.DATE_TAKEN,
                 MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, null),
+                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, null, "DCIM/Camera/"),
             )
         )
 
@@ -214,7 +216,7 @@ class PhotoSyncWorkerTest {
         // Sync completion timestamp must be written even when there are no new items
         verify(exactly = 1) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as succeeded with zero items
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true) }
     }
 
     @Test
@@ -244,7 +246,7 @@ class PhotoSyncWorkerTest {
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as failed
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("401" to 1), succeeded = false) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosFound = any(), videosFound = any(), photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("401" to 1), relativePathSample = any(), succeeded = false) }
     }
 
     @Test
@@ -272,7 +274,7 @@ class PhotoSyncWorkerTest {
         // The sync completion timestamp must NOT be written on failure
         verify(exactly = 0) { mockPrefs.lastSyncCompletedAtMs = any() }
         // Telemetry should be reported as failed
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("network" to 1), succeeded = false) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosFound = any(), videosFound = any(), photosSynced = 0, alreadyUploaded = 0, errors = 1, errorBreakdown = mapOf("network" to 1), relativePathSample = any(), succeeded = false) }
     }
 
     @Test
@@ -298,7 +300,7 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 5000L * 1000L }
         // Telemetry: photosSynced=0 (not a new upload), alreadyUploaded=1
         verify(exactly = 1) {
-            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 0, alreadyUploaded = 1, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosFound = any(), videosFound = any(), photosSynced = 0, alreadyUploaded = 1, errors = 0, errorBreakdown = emptyMap(), relativePathSample = any(), succeeded = true)
         }
     }
 
@@ -481,7 +483,7 @@ class PhotoSyncWorkerTest {
         worker.doWork()
 
         verify(exactly = 1) {
-            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true)
+            mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosFound = any(), videosFound = any(), photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = any(), succeeded = true)
         }
     }
 
@@ -509,7 +511,7 @@ class PhotoSyncWorkerTest {
         verify(exactly = 1) { mockUploader.upload(any(), eq("video.mp4"), eq("video/mp4"), any()) }
         // Sync timestamp should advance to the video's DATE_ADDED
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 8000L * 1000L }
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 1, photosFound = any(), videosFound = any(), photosSynced = 1, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = any(), succeeded = true) }
     }
 
     @Test
@@ -535,7 +537,7 @@ class PhotoSyncWorkerTest {
         verify(exactly = 2) { mockUploader.upload(any(), any(), any(), any()) }
         // Timestamp should advance to the later item (the video at 9001s)
         verify(exactly = 1) { mockPrefs.lastSyncTimestampMs = 9001L * 1000L }
-        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 2, photosSynced = 2, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), succeeded = true) }
+        verify(exactly = 1) { mockTelemetry.reportSync(durationMs = any(), itemsFound = 2, photosFound = any(), videosFound = any(), photosSynced = 2, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = any(), succeeded = true) }
     }
 
     @Test

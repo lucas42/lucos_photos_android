@@ -54,7 +54,10 @@ class PhotoSyncWorker(
         val mediaItems = (photos + videos).sortedBy { it.dateAddedSeconds }
         Log.i(TAG, "Found ${mediaItems.size} new media item(s) to upload (${photos.size} photo(s), ${videos.size} video(s))")
 
+        val photosFound = photos.size
+        val videosFound = videos.size
         val itemsFound = mediaItems.size
+        val relativePathSample = mediaItems.firstOrNull()?.relativePath
         var anyRetryableFailure = false
         // Note: this counter is named photosSynced for backwards compatibility with the
         // telemetry schema — it now counts both photos and videos. Only HTTP 201 responses
@@ -151,10 +154,13 @@ class PhotoSyncWorker(
             telemetry.reportSync(
                 durationMs = durationMs,
                 itemsFound = itemsFound,
+                photosFound = photosFound,
+                videosFound = videosFound,
                 photosSynced = photosSynced,
                 alreadyUploaded = alreadyUploaded,
                 errors = errors,
                 errorBreakdown = errorBreakdown,
+                relativePathSample = relativePathSample,
                 succeeded = false,
             )
             Result.retry()
@@ -164,10 +170,13 @@ class PhotoSyncWorker(
             telemetry.reportSync(
                 durationMs = durationMs,
                 itemsFound = itemsFound,
+                photosFound = photosFound,
+                videosFound = videosFound,
                 photosSynced = photosSynced,
                 alreadyUploaded = alreadyUploaded,
                 errors = errors,
                 errorBreakdown = errorBreakdown,
+                relativePathSample = relativePathSample,
                 succeeded = true,
             )
             Result.success()
@@ -277,14 +286,17 @@ class PhotoSyncWorker(
             mimeTypeColumn,
             dateTakenColumn,
             MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH,
         )
         // Restrict to items added after the last sync AND stored somewhere under DCIM/.
         // RELATIVE_PATH (available since API 29 / Android 10) is the directory path relative
-        // to the storage volume root; it always ends with '/'.  Camera items are stored under
-        // DCIM/ by all standard Android camera apps, but the exact subdirectory varies by
-        // manufacturer (e.g. "DCIM/Camera/", "DCIM/100ANDRO/", "DCIM/Camera0/").
-        // Using LIKE 'DCIM/%' matches any subdirectory under DCIM/ while excluding
-        // "Pictures/WhatsApp Images/", "Pictures/Screenshots/", and similar non-camera paths.
+        // to the storage volume root; it always ends with '/'.  On some devices/Android
+        // versions the path includes a volume prefix (e.g. "primary:DCIM/Camera/"), so we use
+        // LIKE '%DCIM/%' rather than 'DCIM/%' to match both prefixed and unprefixed forms.
+        // Camera items are stored under DCIM/ by all standard Android camera apps, but the
+        // exact subdirectory varies by manufacturer (e.g. "DCIM/Camera/", "DCIM/100ANDRO/").
+        // The leading '%' handles any volume prefix while still requiring 'DCIM/' in the path,
+        // correctly excluding "Pictures/WhatsApp Images/", "Pictures/Screenshots/", etc.
         //
         // Additionally exclude media owned by TikTok package names. TikTok saves downloaded
         // videos to the camera roll rather than its own directory, so DCIM/ filtering alone
@@ -297,11 +309,13 @@ class PhotoSyncWorker(
             " OR ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} NOT IN (?, ?))"
         val selectionArgs = arrayOf(
             afterSeconds.toString(),
-            "DCIM/%",
+            "%DCIM/%",
             "com.zhiliaoapp.musically",
             "com.ss.android.ugc.trill",
         )
         val sortOrder = "$dateAddedColumn ASC"
+
+        Log.d(TAG, "queryNewMedia: selection=\"$selection\" args=${selectionArgs.toList()}")
 
         context.contentResolver.query(
             contentUri,
@@ -315,11 +329,14 @@ class PhotoSyncWorker(
             val dateCol = cursor.getColumnIndexOrThrow(dateAddedColumn)
             val mimeCol = cursor.getColumnIndexOrThrow(mimeTypeColumn)
             val dateTakenCol = cursor.getColumnIndexOrThrow(dateTakenColumn)
+            val relativePathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
 
             while (cursor.moveToNext()) {
                 // DATE_TAKEN is in milliseconds; it may be 0 for items with no recorded time.
                 // Treat 0 as absent (null) so we don't send a misleading epoch timestamp to the server.
                 val rawDateTaken = cursor.getLong(dateTakenCol)
+                val relativePath = cursor.getString(relativePathCol)
+                Log.d(TAG, "Found media: ${cursor.getString(nameCol)} relativePath=$relativePath owner=${cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.OWNER_PACKAGE_NAME))}")
                 items.add(
                     MediaEntry(
                         id = cursor.getLong(idCol),
@@ -328,6 +345,7 @@ class PhotoSyncWorker(
                         mimeType = cursor.getString(mimeCol) ?: defaultMimeType,
                         dateTakenMs = if (rawDateTaken > 0L) rawDateTaken else null,
                         contentUri = contentUri,
+                        relativePath = relativePath,
                     )
                 )
             }
@@ -349,6 +367,10 @@ class PhotoSyncWorker(
         /** The MediaStore content URI collection for this item (e.g. Images or Video). Used to
          *  construct the content URI for [android.content.ContentResolver.openInputStream]. */
         val contentUri: Uri,
+        /** The directory path of this item relative to the storage volume root
+         *  ([MediaStore.MediaColumns.RELATIVE_PATH]), e.g. "DCIM/Camera/" or
+         *  "primary:DCIM/Camera/". Used for debug logging and telemetry. */
+        val relativePath: String?,
     )
 
     companion object {
