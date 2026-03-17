@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         val rootLayout = findViewById<LinearLayout>(R.id.root_layout)
         val statusText = findViewById<TextView>(R.id.status_text)
         val syncButton = findViewById<Button>(R.id.sync_now_button)
+        val forceResyncButton = findViewById<Button>(R.id.force_resync_button)
         val versionText = findViewById<TextView>(R.id.version_text)
         val updateBanner = findViewById<TextView>(R.id.update_banner)
         val prefs = SyncPreferences(this)
@@ -107,6 +108,26 @@ class MainActivity : AppCompatActivity() {
                 val request = triggerImmediateSync()
                 statusText.text = getString(R.string.status_syncing)
                 // Observe the work so the UI updates once the sync finishes (or fails).
+                WorkManager.getInstance(this)
+                    .getWorkInfoByIdLiveData(request.id)
+                    .observe(this) { workInfo ->
+                        if (workInfo != null && workInfo.state.isFinished) {
+                            updateStatusText(statusText, SyncPreferences(this))
+                            updateBanner(updateBanner, SyncPreferences(this))
+                        }
+                    }
+            } else {
+                requestPermission()
+            }
+        }
+
+        forceResyncButton.setOnClickListener {
+            if (hasPermission()) {
+                // Reset the sync cursor so the next sync scans all photos from the beginning.
+                // The server deduplicates by SHA256, so re-uploading is harmless.
+                prefs.lastSyncTimestampMs = 0L
+                val request = triggerImmediateSyncReplace()
+                statusText.text = getString(R.string.status_resync_started)
                 WorkManager.getInstance(this)
                     .getWorkInfoByIdLiveData(request.id)
                     .observe(this) { workInfo ->
@@ -187,6 +208,24 @@ class MainActivity : AppCompatActivity() {
             request,
         )
         Log.i(TAG, "Manual sync triggered")
+        return request
+    }
+
+    /**
+     * Cancels any in-progress or pending immediate sync and enqueues a fresh one.
+     *
+     * Used by "Force full resync" so that after resetting [SyncPreferences.lastSyncTimestampMs]
+     * to 0 the new sync always starts from the beginning — even if a sync is already running
+     * with the old (advanced) timestamp.
+     */
+    private fun triggerImmediateSyncReplace(): OneTimeWorkRequest {
+        val request = OneTimeWorkRequestBuilder<PhotoSyncWorker>().build()
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            IMMEDIATE_SYNC_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+        Log.i(TAG, "Force full resync triggered — cancelled existing sync, starting from timestamp 0")
         return request
     }
 

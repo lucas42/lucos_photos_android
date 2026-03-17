@@ -12,4 +12,6 @@
     <string name="update_notification_text">Version %1$s of lucOS Photos Backup is available</string>
     <string name="update_channel_name">App updates</string>
     <string name="update_channel_description">Alerts when a newer version of the app is available</string>
+    <string name="force_resync">Force full resync</string>
+    <string name="status_resync_started">Resync from beginning started…</string>
 </resources>
