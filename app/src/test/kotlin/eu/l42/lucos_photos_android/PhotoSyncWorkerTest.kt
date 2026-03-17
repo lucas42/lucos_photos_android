@@ -64,7 +64,7 @@ class PhotoSyncWorkerTest {
      *
      * Note: ShadowContentResolver ignores the selection/selectionArgs passed to query() and
      * always returns the pre-seeded cursor. This means the SQL filters
-     * (DATE_ADDED > ?, RELATIVE_PATH LIKE 'DCIM/%', OWNER_PACKAGE_NAME NOT IN TikTok packages)
+     * (DATE_ADDED > ?, RELATIVE_PATH LIKE '%DCIM/%', OWNER_PACKAGE_NAME NOT IN TikTok packages)
      * are NOT exercised by these tests — they are enforced by MediaStore on a real device.
      * These tests cover the worker's behaviour once items are returned from the query
      * (upload, retry, timestamp advancement, etc.).
@@ -82,7 +82,7 @@ class PhotoSyncWorkerTest {
         dateTakenMs: Long = 0L,
     ) {
         // Set up a RoboCursor that the worker's query() call will receive.
-        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN, OWNER_PACKAGE_NAME].
+        // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN, OWNER_PACKAGE_NAME, RELATIVE_PATH].
         val cursor = RoboCursor()
         cursor.setColumnNames(
             listOf(
@@ -92,11 +92,12 @@ class PhotoSyncWorkerTest {
                 MediaStore.Images.Media.MIME_TYPE,
                 MediaStore.Images.Media.DATE_TAKEN,
                 MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, null),
+                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, null, "DCIM/Camera/"),
             )
         )
 
@@ -139,11 +140,12 @@ class PhotoSyncWorkerTest {
                 MediaStore.Video.Media.MIME_TYPE,
                 MediaStore.Video.Media.DATE_TAKEN,
                 MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, null),
+                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, null, "DCIM/Camera/"),
             )
         )
 
