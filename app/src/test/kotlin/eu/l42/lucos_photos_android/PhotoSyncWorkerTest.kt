@@ -64,7 +64,7 @@ class PhotoSyncWorkerTest {
      *
      * Note: ShadowContentResolver ignores the selection/selectionArgs passed to query() and
      * always returns the pre-seeded cursor. This means the SQL filters
-     * (DATE_ADDED > ?, RELATIVE_PATH LIKE '%DCIM/%', OWNER_PACKAGE_NAME NOT IN TikTok packages)
+     * (DATE_ADDED > ?, RELATIVE_PATH LIKE '%DCIM/%')
      * are NOT exercised by these tests — they are enforced by MediaStore on a real device.
      * These tests cover the worker's behaviour once items are returned from the query
      * (upload, retry, timestamp advancement, etc.).
@@ -80,6 +80,7 @@ class PhotoSyncWorkerTest {
         displayName: String,
         dateAddedSeconds: Long,
         dateTakenMs: Long = 0L,
+        ownerPackageName: String? = null,
     ) {
         // Set up a RoboCursor that the worker's query() call will receive.
         // The worker's projection is [_ID, DISPLAY_NAME, DATE_ADDED, MIME_TYPE, DATE_TAKEN, OWNER_PACKAGE_NAME, RELATIVE_PATH].
@@ -97,7 +98,7 @@ class PhotoSyncWorkerTest {
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, null, "DCIM/Camera/"),
+                arrayOf(id, displayName, dateAddedSeconds, "image/jpeg", dateTakenMs, ownerPackageName, "DCIM/Camera/"),
             )
         )
 
@@ -130,6 +131,7 @@ class PhotoSyncWorkerTest {
         displayName: String,
         dateAddedSeconds: Long,
         dateTakenMs: Long = 0L,
+        ownerPackageName: String? = null,
     ) {
         val cursor = RoboCursor()
         cursor.setColumnNames(
@@ -145,7 +147,7 @@ class PhotoSyncWorkerTest {
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, null, "DCIM/Camera/"),
+                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, ownerPackageName, "DCIM/Camera/"),
             )
         )
 
@@ -161,14 +163,7 @@ class PhotoSyncWorkerTest {
 
     /**
      * Verifies that media with a null OWNER_PACKAGE_NAME (i.e. camera-captured content) is
-     * still uploaded after the TikTok filter was added. The filter allows null owner packages
-     * through via the "IS NULL OR NOT IN (...)" clause — this test confirms the projection and
-     * cursor handling are correct for the null case.
-     *
-     * Note: the actual OWNER_PACKAGE_NAME filter (excluding TikTok packages) cannot be tested
-     * via Robolectric because ShadowContentResolver ignores selection/selectionArgs. The filter
-     * is enforced by MediaStore on a real device. This test covers the projection/cursor
-     * plumbing only.
+     * still uploaded after the TikTok filter was added.
      */
     @Test
     fun `camera media with null owner package name is still uploaded`() = runBlocking {
@@ -191,6 +186,50 @@ class PhotoSyncWorkerTest {
         val result = worker.doWork()
         assertEquals(ListenableWorker.Result.success(), result)
         verify(exactly = 1) { mockUploader.upload(any(), eq("camera_photo.jpg"), any(), any()) }
+    }
+
+    @Test
+    fun `TikTok photo is skipped and not uploaded`() = runBlocking {
+        seedMediaStoreWithPhoto(
+            id = 902L,
+            displayName = "tiktok_photo.jpg",
+            dateAddedSeconds = 1000L,
+            ownerPackageName = "com.zhiliaoapp.musically",
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>(relaxed = true)
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        val result = worker.doWork()
+        assertEquals(ListenableWorker.Result.success(), result)
+        verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `TikTok video (trill package) is skipped and not uploaded`() = runBlocking {
+        seedMediaStoreWithVideo(
+            id = 903L,
+            displayName = "tiktok_video.mp4",
+            dateAddedSeconds = 1000L,
+            ownerPackageName = "com.ss.android.ugc.trill",
+        )
+
+        val mockUploader = mockk<PhotoUploader>()
+        val mockPrefs = mockk<SyncPreferences>(relaxed = true)
+        every { mockPrefs.lastSyncTimestampMs } returns 0L
+
+        val worker = TestListenableWorkerBuilder<PhotoSyncWorker>(context)
+            .setWorkerFactory(PhotoSyncWorkerFactory(mockUploader, mockPrefs, mockTelemetry))
+            .build()
+
+        val result = worker.doWork()
+        assertEquals(ListenableWorker.Result.success(), result)
+        verify(exactly = 0) { mockUploader.upload(any(), any(), any(), any()) }
     }
 
     @Test
