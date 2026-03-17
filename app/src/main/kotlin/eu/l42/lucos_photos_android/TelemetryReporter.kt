@@ -33,33 +33,47 @@ class TelemetryReporter(
     /**
      * Reports a sync run outcome to the telemetry endpoint.
      *
-     * @param durationMs      Total elapsed time of the sync run in milliseconds.
-     * @param itemsFound      Total number of media items returned by the MediaStore query.
-     * @param photosSynced    Number of items successfully uploaded as new (HTTP 201).
-     * @param alreadyUploaded Number of items already present on the server (HTTP 200).
-     * @param errors          Number of upload failures (retryable or non-retryable) encountered.
-     * @param errorBreakdown  Map of error key (HTTP status code string or "network"/"stream"/
-     *                        "exception") to count of items that failed with that error.
-     * @param succeeded       Whether the sync completed fully (true) or was retried (false).
+     * @param durationMs          Total elapsed time of the sync run in milliseconds.
+     * @param itemsFound          Total number of media items returned by the MediaStore query
+     *                            (photos + videos combined; kept for backwards compatibility).
+     * @param photosFound         Number of photo items returned by the MediaStore query.
+     * @param videosFound         Number of video items returned by the MediaStore query.
+     * @param photosSynced        Number of items successfully uploaded as new (HTTP 201).
+     * @param alreadyUploaded     Number of items already present on the server (HTTP 200).
+     * @param errors              Number of upload failures (retryable or non-retryable).
+     * @param errorBreakdown      Map of error key (HTTP status code string or "network"/"stream"/
+     *                            "exception") to count of items that failed with that error.
+     * @param relativePathSample  The RELATIVE_PATH of the first item found, or null if none.
+     *                            Surfaces the actual path seen by the app, including any volume
+     *                            prefix (e.g. "primary:DCIM/Camera/"), to aid filter debugging.
+     * @param succeeded           Whether the sync completed fully (true) or was retried (false).
      */
     fun reportSync(
         durationMs: Long,
         itemsFound: Int,
+        photosFound: Int,
+        videosFound: Int,
         photosSynced: Int,
         alreadyUploaded: Int,
         errors: Int,
         errorBreakdown: Map<String, Int>,
+        relativePathSample: String?,
         succeeded: Boolean,
     ) {
         val eventType = if (succeeded) "sync_completed" else "sync_failed"
         val data = JSONObject().apply {
             put("duration_ms", durationMs)
             put("items_found", itemsFound)
+            put("photos_found", photosFound)
+            put("videos_found", videosFound)
             put("photos_synced", photosSynced)
             put("already_uploaded", alreadyUploaded)
             put("errors", errors)
             if (errorBreakdown.isNotEmpty()) {
                 put("error_breakdown", JSONObject(errorBreakdown))
+            }
+            if (relativePathSample != null) {
+                put("relative_path_sample", relativePathSample)
             }
         }
         sendEvent(eventType, data)
