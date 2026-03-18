@@ -1,6 +1,6 @@
 [versions]
 agp = "9.1.0"
-coreKtx = "1.17.0"
+coreKtx = "1.18.0"
 appcompat = "1.7.1"
 workManager = "2.11.1"
 okhttp = "5.3.2"
