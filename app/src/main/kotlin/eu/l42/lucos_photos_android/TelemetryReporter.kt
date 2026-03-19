@@ -33,20 +33,24 @@ class TelemetryReporter(
     /**
      * Reports a sync run outcome to the telemetry endpoint.
      *
-     * @param durationMs          Total elapsed time of the sync run in milliseconds.
-     * @param itemsFound          Total number of media items returned by the MediaStore query
-     *                            (photos + videos combined; kept for backwards compatibility).
-     * @param photosFound         Number of photo items returned by the MediaStore query.
-     * @param videosFound         Number of video items returned by the MediaStore query.
-     * @param photosSynced        Number of items successfully uploaded as new (HTTP 201).
-     * @param alreadyUploaded     Number of items already present on the server (HTTP 200).
-     * @param errors              Number of upload failures (retryable or non-retryable).
-     * @param errorBreakdown      Map of error key (HTTP status code string or "network"/"stream"/
-     *                            "exception") to count of items that failed with that error.
-     * @param relativePathSample  The RELATIVE_PATH of the first item found, or null if none.
-     *                            Surfaces the actual path seen by the app, including any volume
-     *                            prefix (e.g. "primary:DCIM/Camera/"), to aid filter debugging.
-     * @param succeeded           Whether the sync completed fully (true) or was retried (false).
+     * @param durationMs            Total elapsed time of the sync run in milliseconds.
+     * @param itemsFound            Total number of media items returned by the MediaStore query
+     *                              (photos + videos combined; kept for backwards compatibility).
+     * @param photosFound           Number of photo items returned by the MediaStore query.
+     * @param videosFound           Number of video items returned by the MediaStore query.
+     * @param photosSynced          Number of items successfully uploaded as new (HTTP 201).
+     * @param alreadyUploaded       Number of items already present on the server (HTTP 200).
+     * @param errors                Number of upload failures (retryable or non-retryable).
+     * @param errorBreakdown        Map of error key (HTTP status code string or "network"/"stream"/
+     *                              "exception") to count of items that failed with that error.
+     * @param relativePathSample    The RELATIVE_PATH of the first item found, or null if none.
+     *                              Surfaces the actual path seen by the app, including any volume
+     *                              prefix (e.g. "primary:DCIM/Camera/"), to aid filter debugging.
+     * @param tiktokFiltered        Number of videos excluded by the TikTok heuristic classifier.
+     * @param tiktokSignalBreakdown For each [TikTokClassifier.Signal] that contributed to a
+     *                              filtered video, the count of videos that triggered that signal.
+     *                              Empty map if no videos were filtered.
+     * @param succeeded             Whether the sync completed fully (true) or was retried (false).
      */
     fun reportSync(
         durationMs: Long,
@@ -58,6 +62,8 @@ class TelemetryReporter(
         errors: Int,
         errorBreakdown: Map<String, Int>,
         relativePathSample: String?,
+        tiktokFiltered: Int = 0,
+        tiktokSignalBreakdown: Map<String, Int> = emptyMap(),
         succeeded: Boolean,
     ) {
         val eventType = if (succeeded) "sync_completed" else "sync_failed"
@@ -74,6 +80,10 @@ class TelemetryReporter(
             }
             if (relativePathSample != null) {
                 put("relative_path_sample", relativePathSample)
+            }
+            put("tiktok_filtered", tiktokFiltered)
+            if (tiktokSignalBreakdown.isNotEmpty()) {
+                put("tiktok_signal_breakdown", JSONObject(tiktokSignalBreakdown))
             }
         }
         sendEvent(eventType, data)

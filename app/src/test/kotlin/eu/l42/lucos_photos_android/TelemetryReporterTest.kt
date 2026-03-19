@@ -16,6 +16,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -288,6 +289,65 @@ class TelemetryReporterTest {
         )
         // Must not throw
         reporter.reportSync(durationMs = 1000, itemsFound = 0, photosFound = 0, videosFound = 0, photosSynced = 0, alreadyUploaded = 0, errors = 0, errorBreakdown = emptyMap(), relativePathSample = null, succeeded = true)
+    }
+
+    // ---------------------------------------------------------------------------
+    // TikTok telemetry fields
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `reportSync includes tiktok_filtered count`() {
+        val (reporter, requestSlot) = makeReporterWithSlot(201)
+        reporter.reportSync(
+            durationMs = 1000,
+            itemsFound = 5,
+            photosFound = 3,
+            videosFound = 2,
+            photosSynced = 3,
+            alreadyUploaded = 0,
+            errors = 0,
+            errorBreakdown = emptyMap(),
+            relativePathSample = null,
+            tiktokFiltered = 2,
+            tiktokSignalBreakdown = mapOf("NO_DATE_TAKEN" to 2, "TIKTOK_FILENAME" to 1),
+            succeeded = true,
+        )
+
+        val buffer = okio.Buffer()
+        requestSlot.captured.body!!.writeTo(buffer)
+        val json = JSONObject(buffer.readUtf8())
+        val data = json.getJSONObject("data")
+        assertEquals(2, data.getInt("tiktok_filtered"))
+        assertTrue("tiktok_signal_breakdown should be present", data.has("tiktok_signal_breakdown"))
+        val breakdown = data.getJSONObject("tiktok_signal_breakdown")
+        assertEquals(2, breakdown.getInt("NO_DATE_TAKEN"))
+        assertEquals(1, breakdown.getInt("TIKTOK_FILENAME"))
+    }
+
+    @Test
+    fun `reportSync includes tiktok_filtered zero and omits breakdown when nothing filtered`() {
+        val (reporter, requestSlot) = makeReporterWithSlot(201)
+        reporter.reportSync(
+            durationMs = 1000,
+            itemsFound = 3,
+            photosFound = 3,
+            videosFound = 0,
+            photosSynced = 3,
+            alreadyUploaded = 0,
+            errors = 0,
+            errorBreakdown = emptyMap(),
+            relativePathSample = null,
+            tiktokFiltered = 0,
+            tiktokSignalBreakdown = emptyMap(),
+            succeeded = true,
+        )
+
+        val buffer = okio.Buffer()
+        requestSlot.captured.body!!.writeTo(buffer)
+        val json = JSONObject(buffer.readUtf8())
+        val data = json.getJSONObject("data")
+        assertEquals(0, data.getInt("tiktok_filtered"))
+        assertFalse("tiktok_signal_breakdown should be absent when empty", data.has("tiktok_signal_breakdown"))
     }
 
     // ---------------------------------------------------------------------------
