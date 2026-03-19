@@ -131,12 +131,17 @@ class PhotoSyncWorkerTest {
      * returns a fake video, and openInputStream() returns fake bytes for that video's URI.
      *
      * Mirrors [seedMediaStoreWithPhoto] but uses [MediaStore.Video.Media.EXTERNAL_CONTENT_URI].
+     * Includes WIDTH, HEIGHT, and DURATION columns required by the TikTok classifier.
      *
-     * @param id           The _ID to assign to the fake video row. Must be unique per test.
-     * @param displayName  The DISPLAY_NAME for the fake video.
-     * @param dateAddedSeconds  The DATE_ADDED value (epoch seconds) for the fake video.
-     * @param dateTakenMs  The DATE_TAKEN value (epoch milliseconds) for the fake video, or 0
-     *                     to simulate a video with no recorded taken-at time.
+     * @param id               The _ID to assign to the fake video row. Must be unique per test.
+     * @param displayName      The DISPLAY_NAME for the fake video.
+     * @param dateAddedSeconds The DATE_ADDED value (epoch seconds) for the fake video.
+     * @param dateTakenMs      The DATE_TAKEN value (epoch milliseconds) for the fake video, or 0
+     *                         to simulate a video with no recorded taken-at time.
+     * @param ownerPackageName The OWNER_PACKAGE_NAME for the fake video, or null if absent/redacted.
+     * @param width            Width in pixels (for TikTok aspect ratio check). Default 1920 (landscape).
+     * @param height           Height in pixels. Default 1080 (landscape).
+     * @param durationMs       Duration in milliseconds. Default 300000 (5 minutes, above threshold).
      */
     private fun seedMediaStoreWithVideo(
         id: Long,
@@ -144,6 +149,9 @@ class PhotoSyncWorkerTest {
         dateAddedSeconds: Long,
         dateTakenMs: Long = 0L,
         ownerPackageName: String? = null,
+        width: Int = 1920,
+        height: Int = 1080,
+        durationMs: Long = 300_000L,
     ) {
         val cursor = RoboCursor()
         cursor.setColumnNames(
@@ -155,11 +163,14 @@ class PhotoSyncWorkerTest {
                 MediaStore.Video.Media.DATE_TAKEN,
                 MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
                 MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.WIDTH,
+                MediaStore.MediaColumns.HEIGHT,
+                MediaStore.Video.VideoColumns.DURATION,
             )
         )
         cursor.setResults(
             arrayOf(
-                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, ownerPackageName, "DCIM/Camera/"),
+                arrayOf(id, displayName, dateAddedSeconds, "video/mp4", dateTakenMs, ownerPackageName, "DCIM/Camera/", width, height, durationMs),
             )
         )
 
@@ -201,12 +212,14 @@ class PhotoSyncWorkerTest {
     }
 
     @Test
-    fun `TikTok photo is skipped and not uploaded`() = runBlocking {
-        seedMediaStoreWithPhoto(
+    fun `TikTok video (known package name) is skipped and not uploaded`() = runBlocking {
+        // Android <11: OWNER_PACKAGE_NAME is available; score = 100, well above threshold.
+        seedMediaStoreWithVideo(
             id = 902L,
-            displayName = "tiktok_photo.jpg",
+            displayName = "tiktok_video.mp4",
             dateAddedSeconds = 1000L,
             ownerPackageName = "com.zhiliaoapp.musically",
+            dateTakenMs = 1700000000000L, // has DATE_TAKEN — only OWNER_PACKAGE signal fires
         )
 
         val mockUploader = mockk<PhotoUploader>()
@@ -229,6 +242,7 @@ class PhotoSyncWorkerTest {
             displayName = "tiktok_video.mp4",
             dateAddedSeconds = 1000L,
             ownerPackageName = "com.ss.android.ugc.trill",
+            dateTakenMs = 1700000000000L,
         )
 
         val mockUploader = mockk<PhotoUploader>()
