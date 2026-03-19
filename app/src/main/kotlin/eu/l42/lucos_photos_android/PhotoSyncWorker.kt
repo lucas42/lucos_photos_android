@@ -47,17 +47,23 @@ class PhotoSyncWorker(
         Log.i(TAG, "Querying for media added after timestamp $lastSyncSeconds (epoch seconds)")
 
         val photos = queryNewPhotos(lastSyncSeconds)
-        val videos = queryNewVideos(lastSyncSeconds)
+        val videoQueryResult = queryNewVideos(lastSyncSeconds)
+        val videos = videoQueryResult.items
+        val tiktokFilterResult = videoQueryResult.tiktokFilterResult
 
         // Merge and sort by DATE_ADDED ascending so we process oldest-first and can
         // advance the sync timestamp incrementally even if a batch is interrupted.
         val mediaItems = (photos + videos).sortedBy { it.dateAddedSeconds }
-        Log.i(TAG, "Found ${mediaItems.size} new media item(s) to upload (${photos.size} photo(s), ${videos.size} video(s))")
+        Log.i(TAG, "Found ${mediaItems.size} new media item(s) to upload " +
+            "(${photos.size} photo(s), ${videos.size} video(s), " +
+            "${tiktokFilterResult.filtered} TikTok video(s) filtered)")
 
         val photosFound = photos.size
         val videosFound = videos.size
         val itemsFound = mediaItems.size
         val relativePathSample = mediaItems.firstOrNull()?.relativePath
+        val tiktokFiltered = tiktokFilterResult.filtered
+        val tiktokSignalBreakdown = tiktokFilterResult.signalBreakdown
         var anyRetryableFailure = false
         // Note: this counter is named photosSynced for backwards compatibility with the
         // telemetry schema — it now counts both photos and videos. Only HTTP 201 responses
@@ -161,6 +167,8 @@ class PhotoSyncWorker(
                 errors = errors,
                 errorBreakdown = errorBreakdown,
                 relativePathSample = relativePathSample,
+                tiktokFiltered = tiktokFiltered,
+                tiktokSignalBreakdown = tiktokSignalBreakdown,
                 succeeded = false,
             )
             Result.retry()
@@ -177,6 +185,8 @@ class PhotoSyncWorker(
                 errors = errors,
                 errorBreakdown = errorBreakdown,
                 relativePathSample = relativePathSample,
+                tiktokFiltered = tiktokFiltered,
+                tiktokSignalBreakdown = tiktokSignalBreakdown,
                 succeeded = true,
             )
             Result.success()
@@ -231,16 +241,39 @@ class PhotoSyncWorker(
     }
 
     /**
+     * Result of querying and filtering videos, including the accepted items and a summary of
+     * any TikTok-classified videos that were excluded.
+     */
+    data class VideoQueryResult(
+        val items: List<MediaEntry>,
+        val tiktokFilterResult: TikTokFilterResult,
+    )
+
+    /**
+     * Summary of TikTok classification decisions made during a video query.
+     *
+     * @param filtered         Number of videos excluded as TikTok.
+     * @param signalBreakdown  For each [TikTokClassifier.Signal] that contributed to any filtered
+     *                         video, the count of filtered videos that triggered that signal.
+     *                         Only includes signals from filtered (score >= threshold) videos.
+     */
+    data class TikTokFilterResult(
+        val filtered: Int,
+        val signalBreakdown: Map<String, Int>,
+    )
+
+    /**
      * Queries MediaStore for videos with DATE_ADDED > [afterSeconds] that are stored in the
      * device's DCIM directory (i.e. camera-recorded content).
      *
-     * We filter by RELATIVE_PATH (available since API 29 / Android 10) using a prefix match
-     * on "DCIM/" to capture camera roll items regardless of the specific subdirectory used
-     * by the device manufacturer, while excluding WhatsApp downloads, social media cache,
-     * and other non-camera videos stored under "Pictures/" or similar paths.
+     * Videos classified as TikTok downloads by [TikTokClassifier] are excluded from the result.
+     * See [TikTokFilterResult] for filtering statistics.
      */
-    private fun queryNewVideos(afterSeconds: Long): List<MediaEntry> {
-        return queryNewMedia(
+    private fun queryNewVideos(afterSeconds: Long): VideoQueryResult {
+        val signalBreakdown = mutableMapOf<String, Int>()
+        var filtered = 0
+
+        val items = queryNewMedia(
             contentUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             idColumn = MediaStore.Video.Media._ID,
             displayNameColumn = MediaStore.Video.Media.DISPLAY_NAME,
@@ -250,6 +283,30 @@ class PhotoSyncWorker(
             afterSeconds = afterSeconds,
             defaultDisplayName = "video.mp4",
             defaultMimeType = "video/mp4",
+            extraVideoColumns = true,
+        ) { entry ->
+            val classification = TikTokClassifier.classify(
+                ownerPackage = entry.ownerPackage,
+                dateTakenMs = entry.dateTakenMs,
+                displayName = entry.displayName,
+                width = entry.width,
+                height = entry.height,
+                durationMs = entry.durationMs,
+            )
+            if (classification.isTikTok) {
+                filtered++
+                for (signal in classification.signals) {
+                    signalBreakdown[signal.name] = (signalBreakdown[signal.name] ?: 0) + 1
+                }
+                false // exclude this video
+            } else {
+                true // include this video
+            }
+        }
+
+        return VideoQueryResult(
+            items = items,
+            tiktokFilterResult = TikTokFilterResult(filtered = filtered, signalBreakdown = signalBreakdown),
         )
     }
 
@@ -265,6 +322,12 @@ class PhotoSyncWorker(
      * @param afterSeconds       Only return items with DATE_ADDED > this value (epoch seconds).
      * @param defaultDisplayName Fallback display name if MediaStore returns null.
      * @param defaultMimeType    Fallback MIME type if MediaStore returns null.
+     * @param extraVideoColumns  When true, also queries WIDTH, HEIGHT, and DURATION columns.
+     *                           Use for video queries only — these columns are not present on
+     *                           the images collection.
+     * @param filter             Optional callback invoked for each [MediaEntry] before it is added
+     *                           to the result list. Return true to include the item, false to exclude
+     *                           it. When null, all items are included.
      */
     private fun queryNewMedia(
         contentUri: Uri,
@@ -276,10 +339,12 @@ class PhotoSyncWorker(
         afterSeconds: Long,
         defaultDisplayName: String,
         defaultMimeType: String,
+        extraVideoColumns: Boolean = false,
+        filter: ((MediaEntry) -> Boolean)? = null,
     ): List<MediaEntry> {
         val items = mutableListOf<MediaEntry>()
 
-        val projection = arrayOf(
+        val baseProjection = arrayOf(
             idColumn,
             displayNameColumn,
             dateAddedColumn,
@@ -288,6 +353,13 @@ class PhotoSyncWorker(
             MediaStore.MediaColumns.OWNER_PACKAGE_NAME,
             MediaStore.MediaColumns.RELATIVE_PATH,
         )
+        val videoProjection = arrayOf(
+            MediaStore.MediaColumns.WIDTH,
+            MediaStore.MediaColumns.HEIGHT,
+            MediaStore.Video.VideoColumns.DURATION,
+        )
+        val projection = if (extraVideoColumns) baseProjection + videoProjection else baseProjection
+
         // Restrict to items added after the last sync AND stored somewhere under DCIM/.
         // RELATIVE_PATH (available since API 29 / Android 10) is the directory path relative
         // to the storage volume root; it always ends with '/'.  On some devices/Android
@@ -298,7 +370,7 @@ class PhotoSyncWorker(
         // The leading '%' handles any volume prefix while still requiring 'DCIM/' in the path,
         // correctly excluding "Pictures/WhatsApp Images/", "Pictures/Screenshots/", etc.
         //
-        // TikTok exclusion is applied in Kotlin (see cursor loop below) rather than as a SQL
+        // TikTok exclusion is applied in Kotlin (see filter callback) rather than as a SQL
         // NOT IN clause. On some Android versions the MediaStore ContentProvider silently
         // returns an empty cursor when NOT IN with bound parameters appears in the selection
         // string, causing zero results with no error or exception.
@@ -326,33 +398,38 @@ class PhotoSyncWorker(
             val dateTakenCol = cursor.getColumnIndexOrThrow(dateTakenColumn)
             val ownerPackageCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.OWNER_PACKAGE_NAME)
             val relativePathCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            val widthCol = if (extraVideoColumns) cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.WIDTH) else -1
+            val heightCol = if (extraVideoColumns) cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.HEIGHT) else -1
+            val durationCol = if (extraVideoColumns) cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DURATION) else -1
 
             while (cursor.moveToNext()) {
                 val ownerPackage = cursor.getString(ownerPackageCol)
-                // TikTok saves downloaded videos to the camera roll under DCIM/, so RELATIVE_PATH
-                // filtering alone is not sufficient to exclude them. We filter in Kotlin rather
-                // than SQL (NOT IN) because some Android versions silently return an empty cursor
-                // when NOT IN with bound parameters appears in the selection string.
-                if (ownerPackage in TIKTOK_PACKAGE_NAMES) {
-                    Log.d(TAG, "Skipping TikTok media: ${cursor.getString(nameCol)} (owner=$ownerPackage)")
-                    continue
-                }
                 // DATE_TAKEN is in milliseconds; it may be 0 for items with no recorded time.
                 // Treat 0 as absent (null) so we don't send a misleading epoch timestamp to the server.
                 val rawDateTaken = cursor.getLong(dateTakenCol)
                 val relativePath = cursor.getString(relativePathCol)
-                Log.d(TAG, "Found media: ${cursor.getString(nameCol)} relativePath=$relativePath owner=$ownerPackage")
-                items.add(
-                    MediaEntry(
-                        id = cursor.getLong(idCol),
-                        displayName = cursor.getString(nameCol) ?: defaultDisplayName,
-                        dateAddedSeconds = cursor.getLong(dateCol),
-                        mimeType = cursor.getString(mimeCol) ?: defaultMimeType,
-                        dateTakenMs = if (rawDateTaken > 0L) rawDateTaken else null,
-                        contentUri = contentUri,
-                        relativePath = relativePath,
-                    )
+                val displayName = cursor.getString(nameCol) ?: defaultDisplayName
+
+                val entry = MediaEntry(
+                    id = cursor.getLong(idCol),
+                    displayName = displayName,
+                    dateAddedSeconds = cursor.getLong(dateCol),
+                    mimeType = cursor.getString(mimeCol) ?: defaultMimeType,
+                    dateTakenMs = if (rawDateTaken > 0L) rawDateTaken else null,
+                    contentUri = contentUri,
+                    relativePath = relativePath,
+                    ownerPackage = ownerPackage,
+                    width = if (widthCol >= 0) cursor.getInt(widthCol) else 0,
+                    height = if (heightCol >= 0) cursor.getInt(heightCol) else 0,
+                    durationMs = if (durationCol >= 0) cursor.getLong(durationCol) else 0L,
                 )
+
+                if (filter != null && !filter(entry)) {
+                    continue
+                }
+
+                Log.d(TAG, "Found media: $displayName relativePath=$relativePath owner=$ownerPackage")
+                items.add(entry)
             }
         }
 
@@ -376,15 +453,18 @@ class PhotoSyncWorker(
          *  ([MediaStore.MediaColumns.RELATIVE_PATH]), e.g. "DCIM/Camera/" or
          *  "primary:DCIM/Camera/". Used for debug logging and telemetry. */
         val relativePath: String?,
+        /** Value of [MediaStore.MediaColumns.OWNER_PACKAGE_NAME], or null if redacted (Android 11+)
+         *  or not queried. Used by [TikTokClassifier]. */
+        val ownerPackage: String? = null,
+        /** Width in pixels ([MediaStore.MediaColumns.WIDTH]). 0 if not queried. */
+        val width: Int = 0,
+        /** Height in pixels ([MediaStore.MediaColumns.HEIGHT]). 0 if not queried. */
+        val height: Int = 0,
+        /** Duration in milliseconds ([MediaStore.Video.VideoColumns.DURATION]). 0 if not queried. */
+        val durationMs: Long = 0L,
     )
 
     companion object {
         private const val TAG = "PhotoSyncWorker"
-
-        /** TikTok package names to exclude from the camera roll sync. */
-        private val TIKTOK_PACKAGE_NAMES = setOf(
-            "com.zhiliaoapp.musically",
-            "com.ss.android.ugc.trill",
-        )
     }
 }
