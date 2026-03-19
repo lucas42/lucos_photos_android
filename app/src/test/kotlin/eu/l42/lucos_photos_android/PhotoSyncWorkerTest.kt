@@ -19,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 import org.robolectric.fakes.RoboCursor
+import org.robolectric.shadows.ShadowContentResolver
 import java.io.ByteArrayInputStream
 
 @RunWith(RobolectricTestRunner::class)
@@ -42,6 +43,18 @@ class PhotoSyncWorkerTest {
         // TestListenableWorkerBuilder bypasses WorkManager entirely and instantiates the worker
         // directly via the supplied WorkerFactory, so WorkManager initialisation is not needed.
 
+        // Robolectric 4.16+ registers FakeMediaProvider for the "media" authority, which intercepts
+        // all ContentResolver queries to MediaStore URIs and routes them through a real SQLite
+        // database. FakeMediaProvider uses a single "files" table with no media_type column, so
+        // image and video collection queries both return all rows — causing cross-contamination
+        // between tests that seed photos and those that seed videos.
+        //
+        // Registering null for the "media" authority makes ShadowContentResolver.getProvider()
+        // return null for that authority, which falls through to the setCursor() shadow mechanism
+        // used by the seed helpers below. ShadowContentResolver.reset() (called between tests by
+        // Robolectric's test runner) clears this registration, so each test starts clean.
+        ShadowContentResolver.registerProviderInternal("media", null)
+
         mockTelemetry = mockk(relaxed = true)
     }
 
@@ -49,10 +62,9 @@ class PhotoSyncWorkerTest {
      * Pre-populates the Robolectric ContentResolver so that the worker's MediaStore image query
      * returns a fake photo, and openInputStream() returns fake bytes for that photo's URI.
      *
-     * Robolectric does not register a real MediaProvider by default, so
-     * ContentResolver.insert() + query() round-tripping does not work — insert() returns a
-     * URI but stores nothing, and query() returns null. Instead, we use two separate
-     * Robolectric mechanisms:
+     * Robolectric 4.16+ adds [org.robolectric.fakes.FakeMediaProvider] which would intercept
+     * MediaStore queries, but setUp() disables it by registering null for the "media" authority.
+     * This restores the shadow cursor mechanism used here.
      *
      * 1. [RoboCursor] + [ShadowContentResolver.setCursor] — pre-sets the cursor that
      *    query() returns for [MediaStore.Images.Media.EXTERNAL_CONTENT_URI]. This makes
@@ -401,18 +413,12 @@ class PhotoSyncWorkerTest {
     @Test
     fun `worker reads stored timestamp and advances it after subsequent upload`() = runBlocking {
         // Simulate a second sync run: prefs already hold a non-zero timestamp from a previous sync.
-        // The MediaStore cursor (seeded below) represents a photo that was added AFTER the stored
+        // The MediaStore row (seeded below) represents a photo that was added AFTER the stored
         // timestamp — i.e. a new photo the previous sync hadn't seen yet.
         //
-        // In Robolectric, ShadowContentResolver returns the pre-seeded cursor regardless of the
-        // selection/selectionArgs — it does not actually filter rows. This test therefore
-        // verifies the worker's timestamp-read → timestamp-advance path (not the SQL filter),
-        // which is the critical invariant: lastSyncTimestampMs is read at the start of each run
-        // and advanced to the most-recently-processed item's dateAddedSeconds after success.
-        //
-        // The SQL filter (DATE_ADDED > ?) is verified indirectly: if the worker passed an
-        // incorrect lastSyncSeconds to the query, the filtering behaviour would diverge from
-        // what MediaStore would return on a real device.
+        // Note: ShadowContentResolver ignores selection args, so the SQL filter (DATE_ADDED > ?)
+        // is NOT applied here — the seeded cursor is always returned regardless of the timestamp.
+        // This test verifies the worker reads and correctly advances the stored timestamp value.
         val previousSyncTimestampMs = 4_000_000L  // 4000 seconds since epoch, in ms
         val newPhotoDateAddedSeconds = 6000L       // photo added AFTER the previous sync
 
