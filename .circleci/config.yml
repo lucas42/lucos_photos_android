@@ -32,6 +32,7 @@ workflows:
               ignore:
                 - main
       - lucos/release-apk:
+          serial-group: << pipeline.project.slug >>/release-apk
           requires:
             - test
           filters:
