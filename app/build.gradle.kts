@@ -50,12 +50,12 @@ val appVersionCode = run {
 
 android {
     namespace = "eu.l42.lucos_photos_android"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "eu.l42.lucos_photos_android"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = appVersionCode
         versionName = appVersionName
 
